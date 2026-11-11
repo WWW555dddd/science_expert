@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertInfoMapper">
+
+    <resultMap type="ExpertInfo" id="ExpertInfoResult">
+        <id     property="expertId"          column="expert_id"          />
+        <result property="expertNo"          column="expert_no"          />
+        <result property="expertName"        column="expert_name"        />
+        <result property="organization"      column="organization"       />
+        <result property="professionalTitle" column="professional_title" />
+        <result property="researchField"     column="research_field"     />
+        <result property="industryField"     column="industry_field"     />
+        <result property="serviceRegion"     column="service_region"     />
+        <result property="phone"             column="phone"              />
+        <result property="email"             column="email"              />
+        <result property="status"            column="status"             />
+        <result property="createBy"          column="create_by"          />
+        <result property="createTime"        column="create_time"        />
+        <result property="updateBy"          column="update_by"          />
+        <result property="updateTime"        column="update_time"        />
+        <result property="remark"            column="remark"             />
+    </resultMap>
+
+    <sql id="selectExpertInfoVo">
+        select expert_id, expert_no, expert_name, organization, professional_title,
+               research_field, industry_field, service_region, phone, email, status,
+               create_by, create_time, update_by, update_time, remark
+        from expert_info
+    </sql>
+
+    <select id="selectExpertInfoList" parameterType="ExpertInfo" resultMap="ExpertInfoResult">
+        <include refid="selectExpertInfoVo"/>
+        <where>
+            <if test="expertNo != null and expertNo != ''">
+                AND expert_no like concat('%', #{expertNo}, '%')
+            </if>
+            <if test="expertName != null and expertName != ''">
+                AND expert_name like concat('%', #{expertName}, '%')
+            </if>
+            <if test="organization != null and organization != ''">
+                AND organization like concat('%', #{organization}, '%')
+            </if>
+            <if test="professionalTitle != null and professionalTitle != ''">
+                AND professional_title like concat('%', #{professionalTitle}, '%')
+            </if>
+            <if test="researchField != null and researchField != ''">
+                AND research_field like concat('%', #{researchField}, '%')
+            </if>
+            <if test="industryField != null and industryField != ''">
+                AND industry_field like concat('%', #{industryField}, '%')
+            </if>
+            <if test="serviceRegion != null and serviceRegion != ''">
+                AND service_region like concat('%', #{serviceRegion}, '%')
+            </if>
+            <if test="status != null and status != ''">
+                AND status = #{status}
+            </if>
+        </where>
+        order by expert_id desc
+    </select>
+
+    <select id="selectExpertInfoByExpertId" parameterType="Long" resultMap="ExpertInfoResult">
+        <include refid="selectExpertInfoVo"/>
+        where expert_id = #{expertId}
+    </select>
+
+    <select id="selectExpertInfoByExpertNo" parameterType="String" resultMap="ExpertInfoResult">
+        <include refid="selectExpertInfoVo"/>
+        where expert_no = #{expertNo}
+        limit 1
+    </select>
+
+    <insert id="insertExpertInfo" parameterType="ExpertInfo" useGeneratedKeys="true" keyProperty="expertId">
+        insert into expert_info
+        (expert_no, expert_name, organization, professional_title, research_field,
+         industry_field, service_region, phone, email, status, remark, create_by, create_time)
+        values
+        (#{expertNo}, #{expertName}, #{organization}, #{professionalTitle}, #{researchField},
+         #{industryField}, #{serviceRegion}, #{phone}, #{email}, #{status}, #{remark}, #{createBy}, sysdate())
+    </insert>
+
+    <update id="updateExpertInfo" parameterType="ExpertInfo">
+        update expert_info
+        <set>
+            <if test="expertNo != null and expertNo != ''">expert_no = #{expertNo},</if>
+            <if test="expertName != null and expertName != ''">expert_name = #{expertName},</if>
+            <if test="organization != null">organization = #{organization},</if>
+            <if test="professionalTitle != null">professional_title = #{professionalTitle},</if>
+            <if test="researchField != null">research_field = #{researchField},</if>
+            <if test="industryField != null">industry_field = #{industryField},</if>
+            <if test="serviceRegion != null">service_region = #{serviceRegion},</if>
+            <if test="phone != null">phone = #{phone},</if>
+            <if test="email != null">email = #{email},</if>
+            <if test="status != null and status != ''">status = #{status},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            update_time = sysdate()
+        </set>
+        where expert_id = #{expertId}
+    </update>
+
+    <delete id="deleteExpertInfoByExpertId" parameterType="Long">
+        delete from expert_info where expert_id = #{expertId}
+    </delete>
+
+    <delete id="deleteExpertInfoByExpertIds" parameterType="Long">
+        delete from expert_info where expert_id in
+        <foreach collection="array" item="expertId" open="(" separator="," close=")">
+            #{expertId}
+        </foreach>
+    </delete>
+</mapper>
