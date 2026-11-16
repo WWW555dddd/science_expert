@@ -1,8 +1,9 @@
 {
-  "name": "ruoyi",
-  "version": "3.9.2",
-  "description": "若依管理系统",
-  "author": "若依",
+  "name": "science-expert-platform",
+  "version": "1.0.0",
+  "description": "科技保险专家管理与协同服务平台",
+  "author": "Science Expert Platform",
+  "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -10,10 +11,6 @@
     "build:prod": "vite build",
     "build:stage": "vite build --mode staging",
     "preview": "vite preview"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://gitee.com/y_project/RuoYi-Vue.git"
   },
   "dependencies": {
     "@element-plus/icons-vue": "2.3.2",

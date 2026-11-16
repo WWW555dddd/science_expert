@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.AgentRuntimeMapper">
+
+    <insert id="insertRun" parameterType="map">
+        insert into expert_agent_run
+        (run_id, objective, run_status, model, max_steps, step_count,
+         create_by, create_time, update_time)
+        values
+        (#{runId}, #{objective}, 'RUNNING', #{model}, #{maxSteps}, 0,
+         #{createBy}, sysdate(), sysdate())
+    </insert>
+
+    <update id="updateRun">
+        update expert_agent_run
+        set run_status = #{runStatus},
+            step_count = #{stepCount},
+            final_answer = #{finalAnswer},
+            error_message = #{errorMessage},
+            update_time = sysdate()
+        where run_id = #{runId}
+    </update>
+
+    <insert id="insertStep" parameterType="map">
+        insert into expert_agent_step
+        (run_id, step_no, tool_name, tool_input_json, observation_json,
+         step_status, latency_ms, create_time)
+        values
+        (#{runId}, #{stepNo}, #{toolName}, #{toolInputJson}, #{observationJson},
+         #{stepStatus}, #{latencyMs}, sysdate())
+    </insert>
+
+    <select id="selectRun" resultType="map">
+        select run_id runId, objective, run_status runStatus, model,
+               max_steps maxSteps, step_count stepCount, final_answer finalAnswer,
+               error_message errorMessage, create_by createBy,
+               create_time createTime, update_time updateTime
+        from expert_agent_run
+        where run_id = #{runId}
+    </select>
+
+    <select id="selectSteps" resultType="map">
+        select step_id stepId, run_id runId, step_no stepNo,
+               tool_name toolName, tool_input_json toolInputJson,
+               observation_json observationJson, step_status stepStatus,
+               latency_ms latencyMs, create_time createTime
+        from expert_agent_step
+        where run_id = #{runId}
+        order by step_no, step_id
+    </select>
+</mapper>

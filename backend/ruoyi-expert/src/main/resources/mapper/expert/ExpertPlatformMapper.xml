@@ -1,0 +1,996 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertPlatformMapper">
+
+    <resultMap id="ExpertProfileResult" type="ExpertProfile">
+        <id property="profileId" column="profile_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="nickName" column="nick_name"/>
+        <result property="realName" column="real_name"/>
+        <result property="organization" column="organization"/>
+        <result property="professionalTitle" column="professional_title"/>
+        <result property="researchField" column="research_field"/>
+        <result property="industryField" column="industry_field"/>
+        <result property="serviceRegion" column="service_region"/>
+        <result property="phone" column="phone"/>
+        <result property="email" column="email"/>
+        <result property="careerSummary" column="career_summary"/>
+        <result property="reviewStatus" column="review_status"/>
+        <result property="serviceStatus" column="service_status"/>
+        <result property="profileCompletion" column="profile_completion"/>
+        <result property="graphVersion" column="graph_version"/>
+        <result property="version" column="version"/>
+        <result property="delFlag" column="del_flag"/>
+        <result property="latestSubmitTime" column="latest_submit_time"/>
+        <result property="approvedTime" column="approved_time"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ExpertMaterialResult" type="ExpertMaterial">
+        <id property="materialId" column="material_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="realName" column="real_name"/>
+        <result property="fileName" column="file_name"/>
+        <result property="filePath" column="file_path"/>
+        <result property="fileType" column="file_type"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="materialCategory" column="material_category"/>
+        <result property="versionNo" column="version_no"/>
+        <result property="jobStatus" column="job_status"/>
+        <result property="reviewStatus" column="review_status"/>
+        <result property="extractedFields" column="extracted_fields"/>
+        <result property="issueCount" column="issue_count"/>
+        <result property="agentMessage" column="agent_message"/>
+        <result property="reviewComment" column="review_comment"/>
+        <result property="latestSubmitTime" column="create_time"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ExpertGraphResult" type="ExpertGraphDimension">
+        <result property="dimensionCode" column="dimension_code"/>
+        <result property="groupCode" column="group_code"/>
+        <result property="groupName" column="group_name"/>
+        <result property="dimensionName" column="dimension_name"/>
+        <result property="weight" column="weight"/>
+        <result property="score" column="score"/>
+        <result property="confidence" column="confidence"/>
+        <result property="evidence" column="evidence"/>
+        <result property="graphStatus" column="graph_status"/>
+        <result property="graphVersion" column="graph_version"/>
+        <result property="profileKind" column="profile_kind"/>
+        <result property="conflictFlag" column="conflict_flag"/>
+        <result property="inferenceMethod" column="inference_method"/>
+        <result property="sourceCount" column="source_count"/>
+        <result property="graphRelationIds" column="graph_relation_ids"/>
+        <result property="graphEntityIds" column="graph_entity_ids"/>
+        <result property="graphEvidenceIds" column="graph_evidence_ids"/>
+        <result property="graphPathCount" column="graph_path_count"/>
+        <result property="profileRuleVersion" column="profile_rule_version"/>
+        <result property="dataStatus" column="data_status"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ExpertScheduleResult" type="ExpertSchedule">
+        <id property="scheduleId" column="schedule_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="weekday" column="weekday"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="serviceMode" column="service_mode"/>
+        <result property="weeklyCapacity" column="weekly_capacity"/>
+        <result property="effectiveFrom" column="effective_from"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <select id="selectProfileByUserId" parameterType="Long" resultMap="ExpertProfileResult">
+        select p.*, u.user_name, u.nick_name,
+               (select count(1) from expert_material m where m.user_id = p.user_id) material_count
+        from expert_profile p
+        left join sys_user u on u.user_id = p.user_id
+        where p.user_id = #{userId} and p.del_flag = '0'
+    </select>
+
+    <select id="selectProfileByUserIdForUpdate" parameterType="Long" resultMap="ExpertProfileResult">
+        select p.*,
+               (select u.user_name from sys_user u where u.user_id = p.user_id) user_name,
+               (select u.nick_name from sys_user u where u.user_id = p.user_id) nick_name
+        from expert_profile p
+        where p.user_id = #{userId} and p.del_flag = '0'
+        for update
+    </select>
+
+    <select id="selectAdminProfileByUserId" parameterType="Long" resultMap="ExpertProfileResult">
+        select p.*, u.user_name, u.nick_name,
+               (select count(1) from expert_material m where m.user_id = p.user_id) material_count
+        from expert_profile p
+        left join sys_user u on u.user_id = p.user_id
+        where p.user_id = #{userId}
+    </select>
+
+    <select id="selectAdminProfileByUserIdForUpdate" parameterType="Long" resultMap="ExpertProfileResult">
+        select p.*,
+               (select u.user_name from sys_user u where u.user_id = p.user_id) user_name,
+               (select u.nick_name from sys_user u where u.user_id = p.user_id) nick_name
+        from expert_profile p
+        where p.user_id = #{userId}
+        for update
+    </select>
+
+    <select id="countDeletedProfileByUserId" parameterType="Long" resultType="int">
+        select count(1)
+        from expert_profile
+        where user_id = #{userId} and del_flag = '2'
+    </select>
+
+    <insert id="upsertProfile" parameterType="ExpertProfile">
+        insert into expert_profile
+        (user_id, real_name, organization, professional_title, research_field, industry_field,
+         service_region, phone, email, career_summary, review_status, service_status,
+         profile_completion, del_flag, create_by, create_time, update_by, update_time)
+        values
+        (#{userId}, #{realName}, #{organization}, #{professionalTitle}, #{researchField}, #{industryField},
+         #{serviceRegion}, #{phone}, #{email}, #{careerSummary}, 'DRAFT', 'PENDING_CERTIFICATION',
+         #{profileCompletion}, '0', #{createBy}, sysdate(), #{updateBy}, sysdate())
+        on duplicate key update
+            real_name = values(real_name),
+            organization = values(organization),
+            professional_title = values(professional_title),
+            research_field = values(research_field),
+            industry_field = values(industry_field),
+            service_region = values(service_region),
+            phone = values(phone),
+            email = values(email),
+            career_summary = values(career_summary),
+            review_status = case when review_status = 'APPROVED' then 'DRAFT' else review_status end,
+            profile_completion = values(profile_completion),
+            del_flag = '0',
+            version = version + 1,
+            update_by = values(update_by),
+            update_time = sysdate()
+    </insert>
+
+    <insert id="upsertAdminProfile" parameterType="ExpertProfile">
+        insert into expert_profile
+        (user_id, real_name, organization, professional_title, research_field, industry_field,
+         service_region, phone, email, career_summary, review_status, service_status,
+         profile_completion, graph_version, del_flag, latest_submit_time, approved_time,
+         create_by, create_time, update_by, update_time)
+        values
+        (#{userId}, #{realName}, #{organization}, #{professionalTitle}, #{researchField}, #{industryField},
+         #{serviceRegion}, #{phone}, #{email}, #{careerSummary}, #{reviewStatus}, #{serviceStatus},
+         #{profileCompletion}, coalesce(#{graphVersion}, 0), '0', #{latestSubmitTime}, #{approvedTime},
+         #{createBy}, sysdate(), #{updateBy}, sysdate())
+        on duplicate key update
+            real_name = values(real_name),
+            organization = values(organization),
+            professional_title = values(professional_title),
+            research_field = values(research_field),
+            industry_field = values(industry_field),
+            service_region = values(service_region),
+            phone = values(phone),
+            email = values(email),
+            career_summary = values(career_summary),
+            review_status = values(review_status),
+            service_status = values(service_status),
+            profile_completion = values(profile_completion),
+            del_flag = '0',
+            version = version + 1,
+            update_by = values(update_by),
+            update_time = sysdate()
+    </insert>
+
+    <update id="syncApprovedProfile" parameterType="ExpertProfile">
+        update expert_approved
+        set real_name = #{realName},
+            organization = #{organization},
+            research_field = #{researchField},
+            industry_field = #{industryField},
+            service_region = #{serviceRegion},
+            service_status = #{serviceStatus},
+            graph_version = coalesce(#{graphVersion}, graph_version)
+        where user_id = #{userId}
+    </update>
+
+    <select id="selectAdminExpertList" resultType="map">
+        select distinct u.user_id userId, u.user_name userName, u.nick_name nickName,
+               p.profile_id profileId,
+               coalesce(p.real_name, u.nick_name) realName,
+               p.organization, p.professional_title professionalTitle,
+               p.research_field researchField, p.industry_field industryField,
+               p.service_region serviceRegion, p.phone, p.email,
+               p.career_summary careerSummary,
+               coalesce(p.profile_completion, 0) profileCompletion,
+               coalesce(p.review_status, 'NOT_REGISTERED') reviewStatus,
+               coalesce(p.service_status, 'PENDING_CERTIFICATION') serviceStatus,
+               coalesce(p.graph_version, 0) graphVersion,
+               coalesce(p.version, 0) version,
+               (
+                   select count(1)
+                   from expert_graph_score g
+                   where g.user_id = u.user_id and g.graph_status = 'APPROVED'
+               ) graphDimensionCount,
+               (
+                   select count(1)
+                   from expert_graph_score g
+                   where g.user_id = u.user_id
+                     and g.graph_status = 'DRAFT'
+                     and g.profile_kind = 'EVIDENCE_SCORE'
+               ) draftGraphDimensionCount,
+               p.latest_submit_time latestSubmitTime,
+               p.create_time createTime,
+               (select count(1) from expert_material m where m.user_id = u.user_id) materialCount,
+               (select count(1) from expert_schedule s where s.user_id = u.user_id) scheduleCount,
+               (
+                   select count(1) from expert_certification_angle a
+                   where a.required_flag = '1' and a.enabled = '0'
+                     and (
+                         select m2.review_status from expert_material m2
+                         where m2.user_id = u.user_id and m2.material_category = a.category_code
+                         order by m2.material_id desc limit 1
+                     ) = 'APPROVED'
+               ) passedRequired,
+               (
+                   select count(1) from expert_certification_angle a
+                   where a.required_flag = '1' and a.enabled = '0'
+               ) requiredTotal
+        from sys_user u
+        join sys_user_role ur on ur.user_id = u.user_id
+        join sys_role r on r.role_id = ur.role_id and r.role_key = 'expert' and r.del_flag = '0'
+        left join expert_profile p on p.user_id = u.user_id
+        where u.del_flag = '0'
+          and (p.profile_id is null or p.del_flag = '0')
+        <if test="userName != null and userName != ''">
+            and u.user_name like concat('%', #{userName}, '%')
+        </if>
+        <if test="realName != null and realName != ''">
+            and coalesce(p.real_name, u.nick_name) like concat('%', #{realName}, '%')
+        </if>
+        <if test="organization != null and organization != ''">
+            and p.organization like concat('%', #{organization}, '%')
+        </if>
+        <if test="researchField != null and researchField != ''">
+            and p.research_field like concat('%', #{researchField}, '%')
+        </if>
+        <if test="industryField != null and industryField != ''">
+            and p.industry_field like concat('%', #{industryField}, '%')
+        </if>
+        <if test="phone != null and phone != ''">
+            and p.phone like concat('%', #{phone}, '%')
+        </if>
+        <if test="reviewStatus != null and reviewStatus != ''">
+            and coalesce(p.review_status, 'NOT_REGISTERED') = #{reviewStatus}
+        </if>
+        <if test="serviceStatus != null and serviceStatus != ''">
+            and coalesce(p.service_status, 'PENDING_CERTIFICATION') = #{serviceStatus}
+        </if>
+        order by p.profile_id is null, u.user_id
+    </select>
+
+    <select id="selectExpertRoleUsers" resultType="map">
+        select distinct u.user_id userId, u.user_name userName, u.nick_name nickName,
+               p.profile_id profileId, p.real_name realName,
+               p.review_status reviewStatus, p.service_status serviceStatus,
+               p.profile_completion profileCompletion, p.del_flag delFlag
+        from sys_user u
+        join sys_user_role ur on ur.user_id = u.user_id
+        join sys_role r on r.role_id = ur.role_id
+        left join expert_profile p on p.user_id = u.user_id
+        where u.del_flag = '0' and r.del_flag = '0' and r.role_key = 'expert'
+        order by u.user_id
+    </select>
+
+    <select id="countExpertRoleUser" parameterType="Long" resultType="int">
+        select count(1)
+        from sys_user u
+        join sys_user_role ur on ur.user_id = u.user_id
+        join sys_role r on r.role_id = ur.role_id
+        where u.user_id = #{userId} and u.del_flag = '0'
+          and r.del_flag = '0' and r.role_key = 'expert'
+    </select>
+
+    <update id="softDeleteExpertProfile" parameterType="Long">
+        update expert_profile
+        set del_flag = '2', service_status = 'EXITED', update_time = sysdate()
+        where user_id = #{userId} and del_flag = '0'
+    </update>
+
+    <delete id="deleteExpertProfile" parameterType="Long">
+        delete from expert_profile where user_id = #{userId}
+    </delete>
+
+    <delete id="deleteFieldMappingsByUserId" parameterType="Long">
+        delete mapping
+        from expert_field_mapping mapping
+        join expert_material material on material.material_id = mapping.material_id
+        where material.user_id = #{userId}
+    </delete>
+
+    <delete id="deleteMaterialsByUserId" parameterType="Long">
+        delete from expert_material where user_id = #{userId}
+    </delete>
+
+    <delete id="deleteReviewLogsByUserId" parameterType="Long">
+        delete from expert_review_log where user_id = #{userId}
+    </delete>
+
+    <delete id="deleteStatusLogsByUserId" parameterType="Long">
+        delete from expert_status_log where user_id = #{userId}
+    </delete>
+
+    <delete id="deleteGraphScoresByUserId" parameterType="Long">
+        delete from expert_graph_score where user_id = #{userId}
+    </delete>
+
+    <delete id="deleteModelCallLogsByUserId" parameterType="Long">
+        delete from expert_model_call_log where user_id = #{userId}
+    </delete>
+
+    <delete id="deleteApprovedExpert" parameterType="Long">
+        delete from expert_approved where user_id = #{userId}
+    </delete>
+
+    <update id="updateProfileCompletion">
+        update expert_profile set profile_completion = #{completion}, update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <update id="updateProfileReviewStatus">
+        update expert_profile
+        set review_status = #{status},
+            approved_time = case when #{status} = 'APPROVED' then sysdate() else approved_time end,
+            update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <update id="markProfilePendingIfNotApproved" parameterType="Long">
+        update expert_profile
+        set review_status = 'PENDING_REVIEW',
+            update_time = sysdate()
+        where user_id = #{userId}
+          and del_flag = '0'
+          and review_status != 'APPROVED'
+    </update>
+
+    <update id="touchProfileSubmitTime" parameterType="Long">
+        update expert_profile
+        set latest_submit_time = sysdate(), update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <update id="updateProfileServiceStatus">
+        update expert_profile set service_status = #{status}, update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <select id="selectScheduleByUserId" parameterType="Long" resultMap="ExpertScheduleResult">
+        select schedule_id, user_id, weekday, start_time, end_time, service_mode,
+               weekly_capacity, effective_from, create_by, create_time, update_by, update_time
+        from expert_schedule
+        where user_id = #{userId}
+        order by weekday, start_time
+    </select>
+
+    <delete id="deleteScheduleByUserId" parameterType="Long">
+        delete from expert_schedule where user_id = #{userId}
+    </delete>
+
+    <insert id="insertSchedule" parameterType="ExpertSchedule" useGeneratedKeys="true" keyProperty="scheduleId">
+        insert into expert_schedule
+        (user_id, weekday, start_time, end_time, service_mode, weekly_capacity,
+         effective_from, create_by, create_time, update_by, update_time)
+        values
+        (#{userId}, #{weekday}, #{startTime}, #{endTime}, #{serviceMode}, #{weeklyCapacity},
+         #{effectiveFrom}, #{createBy}, sysdate(), #{updateBy}, sysdate())
+    </insert>
+
+    <sql id="materialColumns">
+        m.material_id, m.user_id, m.file_name, m.file_path, m.file_type, m.file_size,
+        m.material_category, m.version_no, m.job_status, m.review_status,
+        m.extracted_fields, m.issue_count, m.agent_message, m.review_comment,
+        m.create_by, m.create_time, m.update_by, m.update_time
+    </sql>
+
+    <select id="selectMaterialList" parameterType="ExpertMaterial" resultMap="ExpertMaterialResult">
+        select <include refid="materialColumns"/>
+        from expert_material m
+        where m.user_id = #{userId}
+        <if test="materialCategory != null and materialCategory != ''">
+            and m.material_category = #{materialCategory}
+        </if>
+        <if test="jobStatus != null and jobStatus != ''">
+            and m.job_status = #{jobStatus}
+        </if>
+        order by m.material_id desc
+    </select>
+
+    <select id="selectMaterialById" parameterType="Long" resultMap="ExpertMaterialResult">
+        select <include refid="materialColumns"/>
+        from expert_material m
+        where m.material_id = #{materialId}
+    </select>
+
+    <select id="selectLatestMaterialByUserId" parameterType="Long" resultMap="ExpertMaterialResult">
+        select <include refid="materialColumns"/>
+        from expert_material m
+        where m.user_id = #{userId}
+        order by m.material_id desc
+        limit 1
+    </select>
+
+    <select id="selectLatestMaterialByUserIdAndCategory" resultMap="ExpertMaterialResult">
+        select <include refid="materialColumns"/>
+        from expert_material m
+        where m.user_id = #{userId}
+          and m.material_category = #{categoryCode}
+        order by m.material_id desc
+        limit 1
+    </select>
+
+    <select id="selectCertificationStatus" parameterType="Long" resultType="map">
+        select a.category_code categoryCode, a.angle_name angleName,
+               a.required_flag requiredFlag, a.sort_no sortNo, a.description,
+               m.material_id materialId, m.version_no versionNo,
+               m.file_name fileName, m.file_type fileType, m.job_status jobStatus,
+               m.review_status reviewStatus, m.review_comment reviewComment,
+               m.create_time submitTime,
+               (
+                   select rm.review_comment
+                   from expert_material rm
+                   where rm.user_id = #{userId}
+                     and rm.material_category = a.category_code
+                     and rm.review_status = 'RETURNED'
+                     and rm.review_comment is not null
+                     and trim(rm.review_comment) != ''
+                     and rm.review_comment not in ('无', '暂无')
+                   order by rm.material_id desc
+                   limit 1
+               ) latestReturnComment,
+               (
+                   select rm.file_name
+                   from expert_material rm
+                   where rm.user_id = #{userId}
+                     and rm.material_category = a.category_code
+                     and rm.review_status = 'RETURNED'
+                     and rm.review_comment is not null
+                     and trim(rm.review_comment) != ''
+                     and rm.review_comment not in ('无', '暂无')
+                   order by rm.material_id desc
+                   limit 1
+               ) latestReturnFileName,
+               (
+                   select count(1)
+                   from expert_material am
+                   where am.user_id = #{userId}
+                     and am.material_category = a.category_code
+                     and am.review_status = 'APPROVED'
+               ) approvedCount
+        from expert_certification_angle a
+        left join expert_material m on m.material_id = (
+            select max(m2.material_id)
+            from expert_material m2
+            where m2.user_id = #{userId}
+              and m2.material_category = a.category_code
+        )
+        where a.enabled = '0'
+        order by a.sort_no
+    </select>
+
+    <select id="countRequiredAngles" resultType="int">
+        select count(1)
+        from expert_certification_angle
+        where required_flag = '1' and enabled = '0'
+    </select>
+
+    <select id="countApprovedRequiredAngles" parameterType="Long" resultType="int">
+        select count(1)
+        from expert_certification_angle a
+        where a.required_flag = '1'
+          and a.enabled = '0'
+          and (
+              select m.review_status
+              from expert_material m
+              where m.user_id = #{userId}
+                and m.material_category = a.category_code
+              order by m.material_id desc
+              limit 1
+          ) = 'APPROVED'
+    </select>
+
+    <select id="countAgentReadyRequiredAngles" parameterType="Long" resultType="int">
+        select count(1)
+        from expert_certification_angle a
+        where a.required_flag = '1'
+          and a.enabled = '0'
+          and (
+              select m.job_status
+              from expert_material m
+              where m.user_id = #{userId}
+                and m.material_category = a.category_code
+                and m.review_status = 'APPROVED'
+              order by m.material_id desc
+              limit 1
+          ) = 'REVIEWED'
+    </select>
+
+    <select id="selectMaxMaterialVersion" resultType="int">
+        select coalesce(max(version_no), 0)
+        from expert_material
+        where user_id = #{userId} and material_category = #{categoryCode}
+    </select>
+
+    <insert id="insertMaterial" parameterType="ExpertMaterial" useGeneratedKeys="true" keyProperty="materialId">
+        insert into expert_material
+        (user_id, file_name, file_path, file_type, file_size, material_category, version_no,
+         job_status, review_status, create_by, create_time, update_by, update_time)
+        values
+        (#{userId}, #{fileName}, #{filePath}, #{fileType}, #{fileSize}, #{materialCategory}, #{versionNo},
+         'QUEUED', 'PENDING', #{createBy}, sysdate(), #{updateBy}, sysdate())
+    </insert>
+
+    <insert id="insertAdminApprovedMaterial" parameterType="ExpertMaterial"
+            useGeneratedKeys="true" keyProperty="materialId">
+        insert into expert_material
+        (user_id, file_name, file_path, file_type, file_size, material_category, version_no,
+         job_status, review_status, create_by, create_time, update_by, update_time)
+        values
+        (#{userId}, #{fileName}, #{filePath}, #{fileType}, #{fileSize}, #{materialCategory},
+         #{versionNo}, 'QUEUED', 'APPROVED', #{createBy}, sysdate(), #{updateBy}, sysdate())
+    </insert>
+
+    <update id="claimMaterialJob">
+        update expert_material
+        set job_status = 'PROCESSING',
+            processing_token = #{processingToken},
+            processing_started_at = sysdate(),
+            update_time = sysdate()
+        where material_id = #{materialId}
+          and job_status in ('QUEUED', 'FAILED')
+    </update>
+
+    <update id="releaseStaleMaterialJobs">
+        update expert_material
+        set job_status = 'QUEUED',
+            processing_token = null,
+            processing_started_at = null,
+            agent_message = '处理任务超时，已重新排队',
+            update_time = sysdate()
+        where job_status = 'PROCESSING'
+          and processing_started_at &lt; date_sub(sysdate(), interval 30 minute)
+    </update>
+
+    <select id="selectRecoverableQueuedMaterialIds" resultType="long">
+        select material_id
+        from expert_material
+        where job_status = 'QUEUED'
+          and processing_token is null
+          and update_time &lt; date_sub(sysdate(), interval 10 second)
+        order by material_id
+        limit #{limit}
+    </select>
+
+    <update id="updateMaterialJob">
+        update expert_material
+        set job_status = #{jobStatus},
+            review_status = #{reviewStatus},
+            extracted_fields = #{extractedFields},
+            issue_count = #{issueCount},
+            agent_message = #{message},
+            processing_token = case
+                when #{jobStatus} in ('FAILED', 'REVIEW_PENDING', 'REVIEWED') then null
+                else processing_token
+            end,
+            processing_started_at = case
+                when #{jobStatus} in ('FAILED', 'REVIEW_PENDING', 'REVIEWED') then null
+                else processing_started_at
+            end,
+            update_time = sysdate()
+        where material_id = #{materialId}
+          and processing_token = #{processingToken}
+    </update>
+
+    <update id="updateMaterialReview">
+        update expert_material
+        set review_status = #{reviewStatus},
+            review_comment = #{comment},
+            job_status = 'REVIEWED',
+            update_time = sysdate()
+        where material_id = #{materialId}
+    </update>
+
+    <delete id="deleteFieldMappings" parameterType="Long">
+        delete from expert_field_mapping where material_id = #{materialId}
+    </delete>
+
+    <insert id="insertFieldMapping">
+        insert into expert_field_mapping
+        (material_id, db_field, file_field, extracted_value, confidence, evidence, conflict_flag, create_time)
+        values
+        (#{materialId}, #{dbField}, #{fileField}, #{extractedValue}, #{confidence}, #{evidence}, #{conflictFlag}, sysdate())
+    </insert>
+
+    <select id="selectFieldMappings" parameterType="Long" resultType="map">
+        select mapping_id mappingId, material_id materialId, db_field dbField, file_field fileField,
+               extracted_value extractedValue, confidence, evidence, conflict_flag conflictFlag,
+               create_time createTime
+        from expert_field_mapping
+        where material_id = #{materialId}
+        order by mapping_id
+    </select>
+
+    <delete id="deleteDraftGraph" parameterType="Long">
+        delete from expert_graph_score where user_id = #{userId} and graph_status = 'DRAFT'
+    </delete>
+
+    <delete id="deleteDraftDimensionEvidence" parameterType="Long">
+        delete from expert_graph_dimension_evidence
+        where user_id = #{userId} and graph_status = 'DRAFT'
+    </delete>
+
+    <select id="countDraftGraph" parameterType="Long" resultType="int">
+        select count(1)
+        from expert_graph_score
+        where user_id = #{userId}
+          and graph_status = 'DRAFT'
+          and profile_kind = 'GRAPH_PROFILE'
+          and conflict_flag = '0'
+    </select>
+
+    <select id="countEnabledGraphDimensions" resultType="int">
+        select count(1)
+        from expert_dimension_definition
+        where enabled = '0'
+    </select>
+
+    <delete id="deleteApprovedGraph" parameterType="Long">
+        delete from expert_graph_score
+        where user_id = #{userId} and graph_status = 'APPROVED'
+    </delete>
+
+    <insert id="insertGraphScore">
+        insert into expert_graph_score
+        (user_id, dimension_code, score, confidence, evidence, graph_status,
+         graph_version, profile_kind, conflict_flag, inference_method,
+         source_count, graph_relation_ids, graph_entity_ids, graph_evidence_ids,
+         graph_path_count, profile_rule_version, update_time)
+        values
+        (#{userId}, #{dimensionCode}, #{score}, #{confidence}, #{evidence}, #{status},
+         #{graphVersion}, #{profileKind}, #{conflictFlag}, #{inferenceMethod},
+         #{sourceCount}, #{graphRelationIds}, #{graphEntityIds}, #{graphEvidenceIds},
+         #{graphPathCount}, #{profileRuleVersion}, sysdate())
+    </insert>
+
+    <delete id="deleteDimensionEvidenceByMaterial">
+        delete from expert_graph_dimension_evidence
+        where material_id = #{materialId}
+          and graph_status = #{graphStatus}
+    </delete>
+
+    <insert id="insertDimensionEvidence" parameterType="map">
+        insert into expert_graph_dimension_evidence
+        (user_id, dimension_code, material_id, graph_status, score, confidence,
+         evidence, inference_method, graph_relation_id, graph_entity_id,
+         graph_evidence_id, profile_rule_version, create_time)
+        values
+        (#{userId}, #{dimensionCode}, #{materialId}, #{graphStatus}, #{score},
+         #{confidence}, #{evidence}, #{inferenceMethod}, #{graphRelationId},
+         #{graphEntityId}, #{graphEvidenceId}, #{profileRuleVersion}, sysdate())
+        on duplicate key update
+            score = values(score),
+            confidence = values(confidence),
+            evidence = values(evidence),
+            inference_method = values(inference_method),
+            graph_relation_id = values(graph_relation_id),
+            graph_entity_id = values(graph_entity_id),
+            graph_evidence_id = values(graph_evidence_id),
+            profile_rule_version = values(profile_rule_version),
+            create_time = sysdate()
+    </insert>
+
+    <select id="selectLatestDimensionEvidence" resultType="map">
+        select e.evidence_id evidenceId, e.user_id userId,
+               e.dimension_code dimensionCode, e.material_id materialId,
+               e.graph_status graphStatus, e.score, e.confidence, e.evidence,
+               e.inference_method inferenceMethod, e.graph_relation_id graphRelationId,
+               e.graph_entity_id graphEntityId, e.graph_evidence_id graphEvidenceId,
+               e.profile_rule_version profileRuleVersion, e.create_time createTime,
+               m.material_category materialCategory, m.version_no versionNo,
+               m.file_name fileName
+        from expert_graph_dimension_evidence e
+        join expert_material m on m.material_id = e.material_id
+        where e.user_id = #{userId}
+          and e.graph_status = #{graphStatus}
+          and m.material_id = (
+              select max(m2.material_id)
+              from expert_material m2
+              where m2.user_id = e.user_id
+                and m2.material_category = m.material_category
+          )
+          <if test="graphStatus == 'APPROVED'">
+              and m.review_status = 'APPROVED'
+          </if>
+        order by e.dimension_code, e.material_id
+    </select>
+
+    <update id="approveDraftGraph" parameterType="Long">
+        update expert_graph_score
+        set graph_status = 'APPROVED',
+            graph_version = (select graph_version from expert_profile where user_id = #{userId}),
+            update_time = sysdate()
+        where user_id = #{userId} and graph_status = 'DRAFT'
+    </update>
+
+    <update id="approveDraftGraphEvidence" parameterType="Long">
+        update expert_graph_dimension_evidence
+        set graph_status = 'APPROVED'
+        where user_id = #{userId}
+          and graph_status = 'DRAFT'
+    </update>
+
+    <update id="incrementGraphVersion" parameterType="Long">
+        update expert_profile
+        set graph_version = graph_version + 1, update_time = sysdate()
+        where user_id = #{userId}
+    </update>
+
+    <select id="selectGraphDimensions" resultMap="ExpertGraphResult">
+        select d.dimension_code, d.group_code, d.group_name, d.dimension_name, d.weight,
+               s.score, s.confidence,
+               s.evidence, coalesce(s.graph_status, 'EMPTY') graph_status,
+               coalesce(s.graph_version, 0) graph_version,
+               coalesce(s.profile_kind, 'UNKNOWN') profile_kind,
+               coalesce(s.conflict_flag, '0') conflict_flag,
+               coalesce(s.inference_method, 'NONE') inference_method,
+               coalesce(s.source_count, 0) source_count,
+               s.graph_relation_ids, s.graph_entity_ids, s.graph_evidence_ids,
+               coalesce(s.graph_path_count, 0) graph_path_count,
+               s.profile_rule_version,
+               case when s.score_id is null
+                    then 'INSUFFICIENT_EVIDENCE'
+                    when s.conflict_flag = '1'
+                    then 'CONFLICT'
+                    else 'AVAILABLE'
+                end data_status,
+               s.update_time
+        from expert_dimension_definition d
+        left join expert_graph_score s
+          on s.dimension_code = d.dimension_code
+         and s.user_id = #{userId}
+         and s.graph_status = #{status}
+        where d.enabled = '0'
+        order by d.sort_no
+    </select>
+
+    <insert id="insertReviewLog">
+        insert into expert_review_log
+        (user_id, material_id, action, reviewer_id, reviewer_name,
+         previous_status, current_status, comment, create_time)
+        values
+        (#{userId}, #{materialId}, #{action}, #{reviewerId}, #{reviewerName},
+         #{previousStatus}, #{currentStatus}, #{comment}, sysdate())
+    </insert>
+
+    <select id="selectReviewLogs" parameterType="Long" resultType="map">
+        select log_id logId, user_id userId, material_id materialId, action,
+               reviewer_id reviewerId, reviewer_name reviewerName,
+               previous_status previousStatus, current_status currentStatus, comment, create_time createTime
+        from expert_review_log
+        where user_id = #{userId}
+        order by log_id desc
+    </select>
+
+    <insert id="insertStatusLog">
+        insert into expert_status_log
+        (user_id, previous_status, current_status, reason, credit_related,
+         operator_id, operator_name, create_time)
+        values
+        (#{userId}, #{previousStatus}, #{currentStatus}, #{reason}, #{creditRelated},
+         #{operatorId}, #{operatorName}, sysdate())
+    </insert>
+
+    <select id="selectStatusLogs" parameterType="Long" resultType="map">
+        select log_id logId, user_id userId, previous_status previousStatus,
+               current_status currentStatus, reason, credit_related creditRelated,
+               operator_id operatorId, operator_name operatorName, create_time createTime
+        from expert_status_log
+        where user_id = #{userId}
+        order by log_id desc
+    </select>
+
+    <insert id="upsertApprovedExpert">
+        insert into expert_approved
+        (user_id, real_name, organization, research_field, industry_field, service_region,
+         service_status, source_material_id, graph_version, approved_by, approved_time, snapshot_json)
+        values
+        (#{profile.userId}, #{profile.realName}, #{profile.organization}, #{profile.researchField},
+         #{profile.industryField}, #{profile.serviceRegion}, #{profile.serviceStatus},
+         #{materialId}, #{profile.graphVersion}, #{approvedBy}, sysdate(), #{snapshotJson})
+        on duplicate key update
+            real_name = values(real_name),
+            organization = values(organization),
+            research_field = values(research_field),
+            industry_field = values(industry_field),
+            service_region = values(service_region),
+            service_status = values(service_status),
+            source_material_id = values(source_material_id),
+            graph_version = values(graph_version),
+            approved_by = values(approved_by),
+            approved_time = sysdate(),
+            snapshot_json = values(snapshot_json)
+    </insert>
+
+    <select id="selectReviewQueue" resultType="map">
+        select p.user_id userId, p.real_name realName, u.user_name userName,
+               p.organization, p.professional_title professionalTitle,
+               p.research_field researchField, p.industry_field industryField,
+               p.review_status reviewStatus, p.service_status serviceStatus,
+               p.profile_completion profileCompletion, p.latest_submit_time latestSubmitTime,
+               m.material_id materialId, m.file_name fileName, m.job_status jobStatus,
+               m.review_status materialReviewStatus, m.issue_count issueCount,
+               m.agent_message agentMessage
+        from expert_profile p
+        left join sys_user u on u.user_id = p.user_id
+        left join expert_material m on m.material_id = (
+            select max(m2.material_id) from expert_material m2 where m2.user_id = p.user_id
+        )
+        where (p.review_status in ('PENDING_REVIEW', 'REVIEWING', 'RETURNED')
+               or (m.job_status = 'FAILED' and p.review_status != 'APPROVED'))
+          and p.del_flag = '0'
+        <if test="realName != null and realName != ''">
+            and p.real_name like concat('%', #{realName}, '%')
+        </if>
+        <if test="researchField != null and researchField != ''">
+            and p.research_field like concat('%', #{researchField}, '%')
+        </if>
+        <if test="reviewStatus != null and reviewStatus != ''">
+            and p.review_status = #{reviewStatus}
+        </if>
+        order by p.latest_submit_time is null, p.latest_submit_time desc, p.user_id desc
+    </select>
+
+    <select id="selectReviewDetail" parameterType="Long" resultType="map">
+        select p.user_id userId, p.real_name realName, p.organization, p.professional_title professionalTitle,
+               p.research_field researchField, p.industry_field industryField,
+               p.service_region serviceRegion, p.phone, p.email, p.career_summary careerSummary,
+               p.review_status reviewStatus, p.service_status serviceStatus,
+               p.profile_completion profileCompletion, p.latest_submit_time latestSubmitTime,
+               u.user_name userName, u.nick_name nickName, m.material_id materialId,
+               m.file_name fileName, m.file_path filePath, m.file_type fileType,
+               m.material_category materialCategory, m.job_status jobStatus,
+               m.review_status materialReviewStatus, m.extracted_fields extractedFields,
+               m.issue_count issueCount, m.agent_message agentMessage, m.review_comment reviewComment
+        from expert_profile p
+        left join sys_user u on u.user_id = p.user_id
+        left join expert_material m on m.material_id = (
+            select max(m2.material_id) from expert_material m2 where m2.user_id = p.user_id
+        )
+        where p.user_id = #{userId} and p.del_flag = '0'
+    </select>
+
+    <select id="selectApprovedExperts" resultType="map">
+        select ea.approved_id approvedId, ea.user_id userId, ea.real_name realName, ea.organization,
+               ea.research_field researchField, ea.industry_field industryField,
+               ea.service_region serviceRegion, ea.service_status serviceStatus,
+               ea.graph_version graphVersion, ea.approved_by approvedBy, ea.approved_time approvedTime
+        from expert_approved ea
+        join expert_profile p on p.user_id = ea.user_id
+          and p.review_status = 'APPROVED' and p.del_flag = '0'
+        <where>
+            <if test="realName != null and realName != ''">
+                and ea.real_name like concat('%', #{realName}, '%')
+            </if>
+            <if test="researchField != null and researchField != ''">
+                and ea.research_field like concat('%', #{researchField}, '%')
+            </if>
+            <if test="serviceStatus != null and serviceStatus != ''">
+                and ea.service_status = #{serviceStatus}
+            </if>
+        </where>
+        order by ea.approved_time desc
+    </select>
+
+    <select id="countApprovedExperts" resultType="int">
+        select count(1)
+        from expert_approved ea
+        join expert_profile p on p.user_id = ea.user_id
+          and p.review_status = 'APPROVED' and p.del_flag = '0'
+    </select>
+
+    <select id="countQueue" resultType="int">
+        select count(1) from expert_profile
+        where review_status in ('PENDING_REVIEW', 'REVIEWING') and del_flag = '0'
+    </select>
+
+    <select id="countAgentFailures" resultType="int">
+        select count(1)
+        from expert_material m
+        join expert_profile p on p.user_id = m.user_id and p.del_flag = '0'
+        where m.job_status = 'FAILED'
+    </select>
+
+    <select id="countPausedExperts" resultType="int">
+        select count(1) from expert_profile where service_status = 'PAUSED' and del_flag = '0'
+    </select>
+
+    <select id="selectProcessingJobs" resultType="map">
+        select material_id materialId, user_id userId, file_name fileName,
+               material_category materialCategory, job_status jobStatus,
+               review_status reviewStatus, extracted_fields extractedFields,
+               issue_count issueCount, agent_message agentMessage,
+               create_time createTime, update_time updateTime
+        from expert_material
+        <where>
+            <if test="jobStatus != null and jobStatus != ''">
+                job_status = #{jobStatus}
+            </if>
+        </where>
+        order by material_id desc
+    </select>
+
+    <update id="resetMaterialJob" parameterType="Long">
+        update expert_material
+        set job_status = 'QUEUED',
+            review_status = case when review_status = 'APPROVED' then 'APPROVED' else 'PENDING' end,
+            processing_token = null,
+            processing_started_at = null,
+            agent_message = '任务已重新排队', update_time = sysdate()
+        where material_id = #{materialId}
+          and job_status not in ('QUEUED', 'PROCESSING')
+    </update>
+
+    <insert id="insertObjectCleanupTask">
+        insert ignore into expert_object_cleanup
+        (object_uri, task_status, attempt_count, next_retry_time, create_time, update_time)
+        values
+        (#{objectUri}, 'PENDING', 0, sysdate(), sysdate(), sysdate())
+    </insert>
+
+    <select id="selectObjectCleanupTasks" resultType="ExpertObjectCleanupTask">
+        select cleanup_id cleanupId, object_uri objectUri, task_status taskStatus,
+               attempt_count attemptCount
+        from expert_object_cleanup
+        where task_status = 'PENDING'
+          and next_retry_time &lt;= sysdate()
+        order by cleanup_id
+        limit #{limit}
+    </select>
+
+    <update id="markObjectCleanupDone">
+        update expert_object_cleanup
+        set task_status = 'DONE',
+            update_time = sysdate()
+        where cleanup_id = #{cleanupId}
+    </update>
+
+    <update id="markObjectCleanupRetry">
+        update expert_object_cleanup
+        set attempt_count = attempt_count + 1,
+            next_retry_time = date_add(sysdate(), interval least(attempt_count + 1, 60) minute),
+            last_error = #{lastError},
+            update_time = sysdate()
+        where cleanup_id = #{cleanupId}
+    </update>
+
+    <insert id="insertModelCallLog" parameterType="map">
+        insert into expert_model_call_log
+        (material_id, user_id, provider, model, prompt_version, input_summary_json,
+         output_json, latency_ms, prompt_tokens, completion_tokens, total_tokens,
+         call_status, error_code, error_message, create_time)
+        values
+        (#{materialId}, #{userId}, #{provider}, #{model}, #{promptVersion}, #{inputSummary},
+         #{outputJson}, #{latencyMs}, #{promptTokens}, #{completionTokens}, #{totalTokens},
+         #{callStatus}, #{errorCode}, #{errorMessage}, sysdate())
+    </insert>
+</mapper>

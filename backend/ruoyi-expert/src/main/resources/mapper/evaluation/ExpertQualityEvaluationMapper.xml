@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertQualityEvaluationMapper">
+
+    <select id="selectDatasets" resultType="map">
+        select dataset_id datasetId, dataset_name datasetName,
+               dataset_version datasetVersion, description, status,
+               create_by createBy, create_time createTime
+        from expert_eval_dataset
+        where status = 'ACTIVE'
+        order by dataset_id
+    </select>
+
+    <select id="selectCases" resultType="map">
+        select case_id caseId, dataset_id datasetId, user_id userId,
+               case_name caseName, gold_fields_json goldFieldsJson,
+               gold_entities_json goldEntitiesJson,
+               gold_relations_json goldRelationsJson,
+               gold_conflicts_json goldConflictsJson,
+               notes, create_time createTime
+        from expert_eval_case
+        where dataset_id = #{datasetId}
+        order by case_id
+    </select>
+
+    <insert id="insertRun" parameterType="map"
+            useGeneratedKeys="true" keyProperty="runId">
+        insert into expert_eval_run
+        (dataset_id, run_status, case_count, create_by, create_time, update_time)
+        values
+        (#{datasetId}, 'RUNNING', #{caseCount}, #{createBy}, sysdate(), sysdate())
+    </insert>
+
+    <update id="updateRun" parameterType="map">
+        update expert_eval_run
+        set run_status = #{runStatus},
+            case_count = #{caseCount},
+            metrics_json = #{metricsJson},
+            report_json = #{reportJson},
+            error_message = #{errorMessage},
+            update_time = sysdate()
+        where run_id = #{runId}
+    </update>
+
+    <insert id="insertCaseResult" parameterType="map">
+        insert into expert_eval_case_result
+        (run_id, case_id, user_id, metrics_json, detail_json, create_time)
+        values
+        (#{runId}, #{caseId}, #{userId}, #{metricsJson}, #{detailJson}, sysdate())
+    </insert>
+
+    <select id="selectRun" resultType="map">
+        select run_id runId, dataset_id datasetId, run_status runStatus,
+               case_count caseCount, metrics_json metricsJson,
+               report_json reportJson, error_message errorMessage,
+               create_by createBy, create_time createTime, update_time updateTime
+        from expert_eval_run
+        where run_id = #{runId}
+    </select>
+
+    <select id="selectRunResults" resultType="map">
+        select result_id resultId, run_id runId, case_id caseId, user_id userId,
+               metrics_json metricsJson, detail_json detailJson, create_time createTime
+        from expert_eval_case_result
+        where run_id = #{runId}
+        order by result_id
+    </select>
+</mapper>

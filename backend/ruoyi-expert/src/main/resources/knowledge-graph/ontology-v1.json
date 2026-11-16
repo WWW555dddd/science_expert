@@ -1,0 +1,153 @@
+{
+  "version": "expert-domain-v1",
+  "displayName": "科技保险专家领域本体 V1",
+  "publishedAt": "2026-11-14",
+  "allowedEvidenceSources": [
+    "MATERIAL",
+    "EXPERT_PROFILE",
+    "SERVICE_LOG",
+    "MANUAL"
+  ],
+  "entities": {
+    "Expert": {
+      "description": "平台认证或无档案专家实体",
+      "requiredProperties": ["userId"]
+    },
+    "Organization": {
+      "description": "专家所属单位或协作单位",
+      "requiredProperties": ["name"]
+    },
+    "Credential": {
+      "description": "学历、职称或职业资格",
+      "requiredProperties": ["name"]
+    },
+    "Capability": {
+      "description": "可由认证材料或历史服务证据支持的能力",
+      "requiredProperties": ["name"]
+    },
+    "Industry": {
+      "description": "专家服务的产业方向",
+      "requiredProperties": ["name"]
+    },
+    "Project": {
+      "description": "专家参与的科研、工程或服务项目",
+      "requiredProperties": ["name"]
+    },
+    "Achievement": {
+      "description": "论文、专利、标准、软著或代表性成果",
+      "requiredProperties": ["name"]
+    },
+    "Technology": {
+      "description": "项目或成果使用的技术方法",
+      "requiredProperties": ["name"]
+    },
+    "ServiceRegion": {
+      "description": "专家可提供服务的行政或业务区域",
+      "requiredProperties": ["name"]
+    },
+    "Certification": {
+      "description": "专家认证角度及其审核结果",
+      "requiredProperties": ["categoryCode"]
+    },
+    "Material": {
+      "description": "认证材料源文件",
+      "requiredProperties": ["materialId"]
+    },
+    "Task": {
+      "description": "待匹配的科技保险服务需求",
+      "requiredProperties": ["title"]
+    }
+  },
+  "relations": {
+    "BELONGS_TO": {
+      "from": ["Expert"],
+      "to": ["Organization"],
+      "cardinality": "N:1",
+      "evidenceRequired": true
+    },
+    "HAS_CREDENTIAL": {
+      "from": ["Expert"],
+      "to": ["Credential"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "EXPERTISE_IN": {
+      "from": ["Expert"],
+      "to": ["Capability"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "WORKS_IN_INDUSTRY": {
+      "from": ["Expert"],
+      "to": ["Industry"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "SERVES_REGION": {
+      "from": ["Expert"],
+      "to": ["ServiceRegion"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "PARTICIPATED_IN": {
+      "from": ["Expert"],
+      "to": ["Project"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "PRODUCED": {
+      "from": ["Expert"],
+      "to": ["Achievement"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "PROJECT_PRODUCED": {
+      "from": ["Project"],
+      "to": ["Achievement"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "USES_TECHNOLOGY": {
+      "from": ["Project"],
+      "to": ["Technology"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "APPLIES_TO": {
+      "from": ["Technology"],
+      "to": ["Industry"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "ACHIEVEMENT_BASED_ON": {
+      "from": ["Achievement"],
+      "to": ["Material"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "HAS_CERTIFICATION": {
+      "from": ["Expert"],
+      "to": ["Certification"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "CERTIFIED_BY": {
+      "from": ["Certification"],
+      "to": ["Material"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "REQUIRES_CAPABILITY": {
+      "from": ["Task"],
+      "to": ["Capability"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "ELIGIBLE_FOR": {
+      "from": ["Expert"],
+      "to": ["Task"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    }
+  }
+}

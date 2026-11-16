@@ -51,7 +51,10 @@
 	
 	<select id="selectMenuTreeAll" resultMap="SysMenuResult">
 		select distinct m.menu_id, m.parent_id, m.menu_name, m.path, m.component, m.`query`, m.route_name, m.visible, m.status, ifnull(m.perms,'') as perms, m.is_frame, m.is_cache, m.menu_type, m.icon, m.order_num, m.create_time
-		from sys_menu m where m.menu_type in ('M', 'C') and m.status = 0
+		from sys_menu m
+		where m.menu_type in ('M', 'C') and m.status = 0
+		  <!-- 超级管理员统一使用全量专家管理，不加载当前登录人的个人专家中心 -->
+		  and m.menu_id not in (3000, 3010, 3020, 3030, 3040, 3050, 3011, 3012, 3013, 3014)
 		order by m.parent_id, m.order_num
 	</select>
 	
@@ -212,4 +215,4 @@
 	    delete from sys_menu where menu_id = #{menuId}
 	</delete>
 
-</mapper> 
+</mapper>

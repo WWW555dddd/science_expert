@@ -1,5 +1,6 @@
 ﻿# Backend build
 backend/**/target/
+backend/logs/
 *.log
 
 # Frontend dependencies and build
@@ -21,3 +22,9 @@ frontend/dist/
 backend/**/application-local.yml
 backend/**/application-local.yaml
 backend/**/application-local.properties
+
+# Local MinIO files
+/miniodata/
+
+# Root documentation
+/docs/

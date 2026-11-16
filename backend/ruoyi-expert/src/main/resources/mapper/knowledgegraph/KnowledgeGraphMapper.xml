@@ -1,0 +1,429 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.KnowledgeGraphMapper">
+
+    <select id="selectOntologyVersion" resultType="map">
+        select version_code versionCode, display_name displayName,
+               resource_path resourcePath, status, published_at publishedAt
+        from kg_ontology_version
+        where version_code = #{versionCode}
+          and status = 'ACTIVE'
+    </select>
+
+    <insert id="upsertEntity" parameterType="map">
+        insert into kg_entity
+        (entity_type, external_key, canonical_name, normalized_name,
+         properties_json, review_status, ontology_version, create_time, update_time)
+        values
+        (#{entityType}, #{externalKey}, #{canonicalName}, #{normalizedName},
+         #{propertiesJson}, #{reviewStatus}, #{ontologyVersion}, sysdate(), sysdate())
+        on duplicate key update
+            canonical_name = values(canonical_name),
+            normalized_name = values(normalized_name),
+            properties_json = values(properties_json),
+            review_status = case
+                when review_status = 'ACCEPTED' then 'ACCEPTED'
+                else values(review_status)
+            end,
+            ontology_version = values(ontology_version),
+            update_time = sysdate()
+    </insert>
+
+    <select id="selectEntityIdByExternalKey" resultType="long">
+        select entity_id
+        from kg_entity
+        where entity_type = #{entityType}
+          and external_key = #{externalKey}
+    </select>
+
+    <insert id="upsertEntityAlias">
+        insert into kg_entity_alias
+        (entity_id, alias_name, normalized_alias, source_type, source_ref, create_time)
+        values
+        (#{entityId}, #{aliasName}, #{normalizedAlias}, #{sourceType}, #{sourceRef}, sysdate())
+        on duplicate key update
+            alias_name = values(alias_name),
+            source_type = values(source_type),
+            source_ref = values(source_ref)
+    </insert>
+
+    <insert id="upsertRelation" parameterType="map">
+        insert into kg_relation
+        (source_entity_id, relation_type, target_entity_id, confidence,
+         valid_from, valid_to, review_status, ontology_version, source_kind,
+         properties_json, create_time, update_time)
+        values
+        (#{sourceEntityId}, #{relationType}, #{targetEntityId}, #{confidence},
+         sysdate(), null, #{reviewStatus}, #{ontologyVersion}, #{sourceKind},
+         #{propertiesJson}, sysdate(), sysdate())
+        on duplicate key update
+            confidence = values(confidence),
+            valid_to = null,
+            review_status = case
+                when review_status = 'ACCEPTED' then 'ACCEPTED'
+                else values(review_status)
+            end,
+            ontology_version = values(ontology_version),
+            source_kind = values(source_kind),
+            properties_json = values(properties_json),
+            update_time = sysdate()
+    </insert>
+
+    <update id="expireProfileRelations">
+        update kg_relation
+        set valid_to = sysdate(),
+            update_time = sysdate()
+        where source_entity_id = #{sourceEntityId}
+          and source_kind in ('PROFILE_PROJECTION', 'CERTIFICATION_PROJECTION')
+          and relation_type in (
+            'BELONGS_TO', 'HAS_CREDENTIAL', 'EXPERTISE_IN',
+            'WORKS_IN_INDUSTRY', 'SERVES_REGION', 'HAS_CERTIFICATION'
+          )
+          and (valid_to is null or valid_to &gt; sysdate())
+    </update>
+
+    <update id="expireCertificationMaterialRelations">
+        update kg_relation
+        set valid_to = sysdate(),
+            update_time = sysdate()
+        where source_entity_id = #{sourceEntityId}
+          and source_kind = 'CERTIFICATION_PROJECTION'
+          and relation_type = 'CERTIFIED_BY'
+          and (valid_to is null or valid_to &gt; sysdate())
+    </update>
+
+    <select id="selectRelationId" resultType="long">
+        select relation_id
+        from kg_relation
+        where source_entity_id = #{sourceEntityId}
+          and relation_type = #{relationType}
+          and target_entity_id = #{targetEntityId}
+    </select>
+
+    <insert id="upsertEvidence" parameterType="map">
+        insert into kg_evidence
+        (evidence_key, relation_id, entity_id, source_type, source_ref,
+         material_id, page_no, char_start, char_end, quote_hash, excerpt,
+         confidence, extractor_version, create_time)
+        values
+        (#{evidenceKey}, #{relationId}, #{entityId,jdbcType=BIGINT},
+         #{sourceType}, #{sourceRef}, #{materialId,jdbcType=BIGINT},
+         #{pageNo,jdbcType=INTEGER}, #{charStart,jdbcType=INTEGER},
+         #{charEnd,jdbcType=INTEGER}, #{quoteHash}, #{excerpt},
+         #{confidence}, #{extractorVersion}, sysdate())
+        on duplicate key update
+            relation_id = values(relation_id),
+            entity_id = values(entity_id),
+            source_type = values(source_type),
+            source_ref = values(source_ref),
+            material_id = values(material_id),
+            page_no = values(page_no),
+            char_start = values(char_start),
+            char_end = values(char_end),
+            quote_hash = values(quote_hash),
+            excerpt = values(excerpt),
+            confidence = values(confidence),
+            extractor_version = values(extractor_version)
+    </insert>
+
+    <update id="reviewMaterialFacts">
+        update kg_relation r
+        join (
+            select distinct relation_id
+            from kg_evidence
+            where material_id = #{materialId}
+        ) material_relations on material_relations.relation_id = r.relation_id
+        set r.review_status = #{reviewStatus},
+            r.valid_to = case
+                when #{reviewStatus} = 'REJECTED' then coalesce(r.valid_to, sysdate())
+                else null
+            end,
+            r.update_time = sysdate()
+    </update>
+
+    <update id="acceptMaterialEntities">
+        update kg_entity e
+        join (
+            select distinct entity_id
+            from kg_evidence
+            where material_id = #{materialId}
+              and entity_id is not null
+        ) material_entities on material_entities.entity_id = e.entity_id
+        set e.review_status = 'ACCEPTED',
+            e.update_time = sysdate()
+    </update>
+
+    <delete id="deleteMaterialFactsByUserId">
+        delete r
+        from kg_relation r
+        join (
+            select distinct e.relation_id
+            from kg_evidence e
+            join expert_material m on m.material_id = e.material_id
+            where m.user_id = #{userId}
+        ) material_relations on material_relations.relation_id = r.relation_id
+    </delete>
+
+    <delete id="deleteMaterialEvidenceByUserId">
+        delete e
+        from kg_evidence e
+        join expert_material m on m.material_id = e.material_id
+        where m.user_id = #{userId}
+    </delete>
+
+    <insert id="insertOutboxEvent" parameterType="map">
+        insert into kg_change_outbox
+        (event_id, event_type, aggregate_type, aggregate_id, payload_json,
+         event_status, attempt_count, available_at, create_time, update_time)
+        values
+        (#{eventId}, #{eventType}, #{aggregateType}, #{aggregateId}, #{payloadJson},
+         'PENDING', 0, sysdate(), sysdate(), sysdate())
+    </insert>
+
+    <select id="selectPendingOutbox" resultType="map">
+        select event_id eventId, event_type eventType,
+               aggregate_type aggregateType, aggregate_id aggregateId,
+               payload_json payloadJson, attempt_count attemptCount,
+               create_time createTime
+        from kg_change_outbox
+        where event_status = 'PENDING'
+          and available_at &lt;= sysdate()
+        order by create_time
+        limit #{limit}
+    </select>
+
+    <update id="claimOutboxEvent">
+        update kg_change_outbox
+        set event_status = 'PROCESSING',
+            locked_at = sysdate(),
+            update_time = sysdate()
+        where event_id = #{eventId}
+          and event_status = 'PENDING'
+    </update>
+
+    <update id="markOutboxDone">
+        update kg_change_outbox
+        set event_status = 'DONE',
+            last_error = null,
+            update_time = sysdate()
+        where event_id = #{eventId}
+    </update>
+
+    <update id="markOutboxRetry">
+        update kg_change_outbox
+        set event_status = 'PENDING',
+            attempt_count = attempt_count + 1,
+            available_at = date_add(sysdate(), interval least(attempt_count + 1, 60) minute),
+            locked_at = null,
+            last_error = #{lastError},
+            update_time = sysdate()
+        where event_id = #{eventId}
+    </update>
+
+    <update id="recoverStaleOutbox">
+        update kg_change_outbox
+        set event_status = 'PENDING',
+            locked_at = null,
+            available_at = sysdate(),
+            last_error = '处理超时，已重新排队',
+            update_time = sysdate()
+        where event_status = 'PROCESSING'
+          and locked_at &lt; date_sub(sysdate(), interval 10 minute)
+    </update>
+
+    <select id="selectExpertEntity" resultType="map">
+        select entity_id entityId, entity_type entityType, external_key externalKey,
+               canonical_name canonicalName, normalized_name normalizedName,
+               properties_json propertiesJson, review_status reviewStatus,
+               ontology_version ontologyVersion,
+               create_time createTime, update_time updateTime
+        from kg_entity
+        where entity_type = 'Expert'
+          and external_key = concat('expert:', #{userId})
+    </select>
+
+    <select id="selectEntityById" resultType="map">
+        select entity_id entityId, entity_type entityType, external_key externalKey,
+               canonical_name canonicalName, normalized_name normalizedName,
+               properties_json propertiesJson, review_status reviewStatus,
+               ontology_version ontologyVersion,
+               create_time createTime, update_time updateTime
+        from kg_entity
+        where entity_id = #{entityId}
+    </select>
+
+    <select id="selectTaskEntityIds" resultType="long">
+        select entity_id
+        from kg_entity
+        where entity_type = 'Task'
+        order by entity_id
+    </select>
+
+    <delete id="deleteExpertEntity">
+        delete from kg_entity
+        where entity_type = 'Expert'
+          and external_key = concat('expert:', #{userId})
+    </delete>
+
+    <select id="selectEntitiesByIds" resultType="map">
+        select entity_id entityId, entity_type entityType, external_key externalKey,
+               canonical_name canonicalName, normalized_name normalizedName,
+               properties_json propertiesJson, review_status reviewStatus,
+               ontology_version ontologyVersion,
+               create_time createTime, update_time updateTime
+        from kg_entity
+        where entity_id in
+        <foreach collection="entityIds" item="entityId" open="(" separator="," close=")">
+            #{entityId}
+        </foreach>
+        order by entity_id
+    </select>
+
+    <select id="selectExtractedEntitiesByUserId" resultType="map">
+        select distinct e.entity_id entityId, e.entity_type entityType,
+               e.external_key externalKey, e.canonical_name canonicalName,
+               e.normalized_name normalizedName, e.properties_json propertiesJson,
+               e.review_status reviewStatus, e.ontology_version ontologyVersion,
+               e.create_time createTime, e.update_time updateTime
+        from kg_entity e
+        join kg_evidence ev on ev.entity_id = e.entity_id
+        join expert_material m on m.material_id = ev.material_id
+        where m.user_id = #{userId}
+          and e.review_status &lt;&gt; 'REJECTED'
+        order by e.entity_id
+    </select>
+
+    <select id="selectRelationsForEntityIds" resultType="map">
+        select r.relation_id relationId, r.relation_type relationType,
+               r.source_entity_id sourceEntityId, se.entity_type sourceEntityType,
+               se.canonical_name sourceEntityName,
+               r.target_entity_id targetEntityId, te.entity_type targetEntityType,
+               te.canonical_name targetEntityName,
+               r.confidence, r.valid_from validFrom, r.valid_to validTo,
+               r.review_status reviewStatus, r.ontology_version ontologyVersion,
+               r.source_kind sourceKind, r.properties_json propertiesJson
+        from kg_relation r
+        join kg_entity se on se.entity_id = r.source_entity_id
+        join kg_entity te on te.entity_id = r.target_entity_id
+        where r.review_status &lt;&gt; 'REJECTED'
+          and (r.valid_to is null or r.valid_to &gt; sysdate())
+          and (
+            r.source_entity_id in
+            <foreach collection="entityIds" item="entityId" open="(" separator="," close=")">
+                #{entityId}
+            </foreach>
+            or r.target_entity_id in
+            <foreach collection="entityIds" item="entityId" open="(" separator="," close=")">
+                #{entityId}
+            </foreach>
+          )
+        order by r.relation_id
+    </select>
+
+    <select id="selectEvidenceByRelationIds" resultType="map">
+        select evidence_id evidenceId, evidence_key evidenceKey,
+               relation_id relationId, entity_id entityId,
+               source_type sourceType, source_ref sourceRef, material_id materialId,
+               page_no pageNo, char_start charStart, char_end charEnd,
+               quote_hash quoteHash, excerpt, confidence,
+               extractor_version extractorVersion, create_time createTime
+        from kg_evidence
+        where relation_id in
+        <foreach collection="relationIds" item="relationId" open="(" separator="," close=")">
+            #{relationId}
+        </foreach>
+        order by relation_id, evidence_id
+    </select>
+
+    <select id="selectEvidenceByEntityIds" resultType="map">
+        select evidence_id evidenceId, evidence_key evidenceKey,
+               relation_id relationId, entity_id entityId,
+               source_type sourceType, source_ref sourceRef, material_id materialId,
+               page_no pageNo, char_start charStart, char_end charEnd,
+               quote_hash quoteHash, excerpt, confidence,
+               extractor_version extractorVersion, create_time createTime
+        from kg_evidence
+        where entity_id in
+        <foreach collection="entityIds" item="entityId" open="(" separator="," close=")">
+            #{entityId}
+        </foreach>
+        order by entity_id, evidence_id
+    </select>
+
+    <select id="selectCapabilityMappings" resultType="map">
+        select dimension_code dimensionCode, capability_code capabilityCode,
+               capability_name capabilityName, ontology_version ontologyVersion
+        from kg_dimension_capability_map
+        order by dimension_code
+    </select>
+
+    <select id="selectDimensionAssessments" resultType="map">
+        select a.entity_id assessmentEntityId,
+               a.canonical_name assessmentName,
+               a.properties_json propertiesJson,
+               a.review_status assessmentStatus,
+               r.relation_id relationId,
+               r.review_status relationStatus,
+               r.confidence relationConfidence,
+               ev.evidence_id evidenceId,
+               ev.material_id materialId,
+               ev.excerpt evidence,
+               ev.confidence evidenceConfidence,
+               ev.source_type sourceType,
+               ev.source_ref sourceRef,
+               m.material_category materialCategory,
+               m.version_no versionNo,
+               m.file_name fileName
+        from kg_entity a
+        join kg_relation r
+          on r.target_entity_id = a.entity_id
+         and r.relation_type = 'ASSESSED_AS'
+        join kg_entity expert
+          on expert.entity_id = r.source_entity_id
+         and expert.entity_type = 'Expert'
+         and expert.external_key = concat('expert:', #{userId})
+        join kg_evidence ev
+          on ev.relation_id = r.relation_id
+        join expert_material m
+          on m.material_id = ev.material_id
+        where a.entity_type = 'CapabilityAssessment'
+          and r.valid_to is null
+          and r.review_status in ('PENDING', 'ACCEPTED')
+          and m.material_id = (
+              select max(m2.material_id)
+              from expert_material m2
+              where m2.user_id = #{userId}
+                and m2.material_category = m.material_category
+          )
+        <if test="acceptedOnly">
+          and a.review_status = 'ACCEPTED'
+          and r.review_status = 'ACCEPTED'
+        </if>
+        order by m.material_category, a.entity_id, ev.evidence_id
+    </select>
+
+    <delete id="deleteMaterialAssessments">
+        delete ev
+        from kg_evidence ev
+        where ev.material_id = #{materialId}
+          and ev.source_ref like concat('material:', #{materialId}, ':dimension:%');
+    </delete>
+
+    <delete id="deleteMaterialAssessmentRelations">
+        delete r
+        from kg_relation r
+        join kg_entity a
+          on r.source_entity_id = a.entity_id
+          or r.target_entity_id = a.entity_id
+        where a.entity_type = 'CapabilityAssessment'
+          and a.external_key like concat('assessment:', #{materialId}, ':%');
+    </delete>
+
+    <delete id="deleteMaterialAssessmentEntities">
+        delete from kg_entity
+        where entity_type = 'CapabilityAssessment'
+          and external_key like concat('assessment:', #{materialId}, ':%');
+    </delete>
+</mapper>

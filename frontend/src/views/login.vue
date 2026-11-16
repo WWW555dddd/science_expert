@@ -52,10 +52,11 @@
           <span v-if="!loading">登 录</span>
           <span v-else>登 录 中...</span>
         </el-button>
-        <div style="float: right;" v-if="register">
-          <router-link class="link-type" :to="'/register'">立即注册</router-link>
-        </div>
       </el-form-item>
+      <div class="register-entry" v-if="register">
+        <span>还没有专家账号？</span>
+        <router-link class="link-type" :to="'/register'">专家注册</router-link>
+      </div>
     </el-form>
     <!--  底部  -->
     <div class="el-login-footer">
@@ -143,6 +144,7 @@ function handleLogin() {
 function getCode() {
   getCodeImg().then(res => {
     captchaEnabled.value = res.captchaEnabled === undefined ? true : res.captchaEnabled
+    register.value = res.registerEnabled === true
     if (captchaEnabled.value) {
       codeUrl.value = "data:image/gif;base64," + res.img
       loginForm.value.uuid = res.uuid
@@ -202,6 +204,15 @@ getCookie()
   font-size: 13px;
   text-align: center;
   color: #bfbfbf;
+}
+.register-entry {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 6px;
+  margin: -8px 0 20px;
+  color: #7b8794;
+  font-size: 14px;
 }
 .login-code {
   width: 33%;

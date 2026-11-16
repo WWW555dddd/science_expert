@@ -1,7 +1,11 @@
 package com.ruoyi.framework.web.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import com.ruoyi.common.constant.CacheConstants;
 import com.ruoyi.common.constant.Constants;
 import com.ruoyi.common.constant.UserConstants;
@@ -10,6 +14,7 @@ import com.ruoyi.common.core.domain.model.RegisterBody;
 import com.ruoyi.common.core.redis.RedisCache;
 import com.ruoyi.common.exception.user.CaptchaException;
 import com.ruoyi.common.exception.user.CaptchaExpireException;
+import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.MessageUtils;
 import com.ruoyi.common.utils.SecurityUtils;
@@ -17,6 +22,7 @@ import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.framework.manager.AsyncManager;
 import com.ruoyi.framework.manager.factory.AsyncFactory;
 import com.ruoyi.system.service.ISysConfigService;
+import com.ruoyi.system.service.ISysRoleService;
 import com.ruoyi.system.service.ISysUserService;
 
 /**
@@ -34,11 +40,15 @@ public class SysRegisterService
     private ISysConfigService configService;
 
     @Autowired
+    private ISysRoleService roleService;
+
+    @Autowired
     private RedisCache redisCache;
 
     /**
      * 注册
      */
+    @Transactional(rollbackFor = Exception.class)
     public String register(RegisterBody registerBody)
     {
         String msg = "", username = registerBody.getUsername(), password = registerBody.getPassword();
@@ -79,17 +89,50 @@ public class SysRegisterService
             sysUser.setNickName(username);
             sysUser.setPwdUpdateDate(DateUtils.getNowDate());
             sysUser.setPassword(SecurityUtils.encryptPassword(password));
-            boolean regFlag = userService.registerUser(sysUser);
+            boolean regFlag;
+            try
+            {
+                regFlag = userService.registerUser(sysUser);
+            }
+            catch (DuplicateKeyException ex)
+            {
+                throw new ServiceException("保存用户'" + username + "'失败，注册账号已存在");
+            }
             if (!regFlag)
             {
                 msg = "注册失败,请联系系统管理人员";
             }
             else
             {
-                AsyncManager.me().execute(AsyncFactory.recordLogininfor(username, Constants.REGISTER, MessageUtils.message("user.register.success")));
+                SysUser registeredUser = userService.selectUserByUserName(username);
+                if (registeredUser == null || roleService.selectRoleById(1001L) == null)
+                {
+                    throw new ServiceException("专家角色未初始化，注册已取消，请联系系统管理人员");
+                }
+                userService.insertUserAuth(registeredUser.getUserId(), new Long[] { 1001L });
+                recordSuccessAfterCommit(username);
             }
         }
         return msg;
+    }
+
+    private void recordSuccessAfterCommit(String username)
+    {
+        Runnable task = () -> AsyncManager.me().execute(AsyncFactory.recordLogininfor(
+                username, Constants.REGISTER, MessageUtils.message("user.register.success")));
+        if (!TransactionSynchronizationManager.isActualTransactionActive())
+        {
+            task.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization()
+        {
+            @Override
+            public void afterCommit()
+            {
+                task.run();
+            }
+        });
     }
 
     /**

@@ -1,7 +1,7 @@
 # 项目相关配置
 ruoyi:
   # 名称
-  name: RuoYi
+  name: 科技保险专家管理与协同服务平台
   # 版本
   version: 3.9.2
   # 版权年份
@@ -16,7 +16,7 @@ ruoyi:
 # 开发环境配置
 server:
   # 服务器的HTTP端口，默认为8080
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
     # 应用的访问路径
     context-path: /
@@ -47,6 +47,11 @@ user:
 
 # Spring配置
 spring:
+  # 自动加载本地配置，IDEA 直接启动和命令行启动均可使用。
+  config:
+    import:
+      - optional:file:./.env.expert.local[.properties]
+      - optional:file:./backend/.env.expert.local[.properties]
   # 资源信息
   messages:
     # 国际化资源文件路径
@@ -72,13 +77,13 @@ spring:
     # redis 配置
     redis:
       # 地址
-      host: localhost
+      host: ${REDIS_HOST:127.0.0.1}
       # 端口，默认为6379
-      port: 6379
+      port: ${REDIS_PORT:6379}
       # 数据库索引
-      database: 0
+      database: ${REDIS_DATABASE:0}
       # 密码
-      password:
+      password: ${REDIS_PASSWORD:}
       # 连接超时时间
       timeout: 10s
       lettuce:
@@ -97,7 +102,7 @@ token:
   # 令牌自定义标识
   header: Authorization
   # 令牌密钥
-  secret: abcdefghijklmnopqrstuvwxyz
+  secret: ${TOKEN_SECRET:abcdefghijklmnopqrstuvwxyz}
   # 令牌有效期（默认30分钟）
   expireTime: 30
 
@@ -135,7 +140,7 @@ referer:
   # 防盗链开关
   enabled: false
   # 允许的域名列表
-  allowed-domains: localhost,127.0.0.1,ruoyi.vip,www.ruoyi.vip
+  allowed-domains: localhost,127.0.0.1
 
 # 防止XSS攻击
 xss:
@@ -145,3 +150,37 @@ xss:
   excludes: /system/notice
   # 匹配链接
   urlPatterns: /system/*,/monitor/*,/tool/*
+
+# 专家平台外部服务配置。敏感值通过环境变量注入，不提交到仓库。
+expert:
+  agent:
+    mode: ${EXPERT_AGENT_MODE:remote}
+    base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com/chat/completions}
+    api-key: ${DEEPSEEK_API_KEY:}
+    model: ${DEEPSEEK_MODEL:deepseek-chat}
+    timeout-seconds: 90
+    max-input-chars: 30000
+  storage:
+    type: ${EXPERT_STORAGE_TYPE:minio}
+    endpoint: ${MINIO_ENDPOINT:http://127.0.0.1:9000}
+    access-key: ${MINIO_ACCESS_KEY:}
+    secret-key: ${MINIO_SECRET_KEY:}
+    bucket: ${MINIO_BUCKET:science-expert}
+    region: ${MINIO_REGION:us-east-1}
+  ocr:
+    enabled: ${EXPERT_OCR_ENABLED:true}
+    provider: ${EXPERT_OCR_PROVIDER:aliyun}
+    endpoint: ${ALIYUN_OCR_ENDPOINT:ocr-api.cn-hangzhou.aliyuncs.com}
+    region: ${ALIYUN_OCR_REGION:cn-hangzhou}
+    access-key: ${ALIYUN_OCR_ACCESS_KEY_ID:}
+    secret-key: ${ALIYUN_OCR_ACCESS_KEY_SECRET:}
+    default-type: ${ALIYUN_OCR_TYPE:Advanced}
+    max-pages: ${ALIYUN_OCR_MAX_PAGES:30}
+    timeout-seconds: 90
+  knowledge-graph:
+    enabled: ${EXPERT_KG_NEO4J_ENABLED:false}
+    neo4j-url: http://127.0.0.1:${NEO4J_HTTP_PORT:7474}
+    neo4j-username: ${NEO4J_USER:neo4j}
+    neo4j-password: ${NEO4J_PASSWORD:}
+    database: ${EXPERT_KG_NEO4J_DATABASE:neo4j}
+    batch-size: ${EXPERT_KG_SYNC_BATCH_SIZE:20}

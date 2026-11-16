@@ -2,6 +2,7 @@
   <div class="register">
     <el-form ref="registerRef" :model="registerForm" :rules="registerRules" class="register-form">
       <h3 class="title">{{ title }}</h3>
+      <p class="register-tip">注册账号将自动绑定专家角色，登录后请先完善专家档案和可服务时间表。</p>
       <el-form-item prop="username">
         <el-input 
           v-model="registerForm.username" 
@@ -81,7 +82,7 @@ import { getCodeImg, register } from "@/api/login"
 import defaultSettings from '@/settings'
 import { usePasswordRule } from "@/utils/passwordRule"
 
-const title = import.meta.env.VITE_APP_TITLE
+const title = "专家注册"
 const footerContent = defaultSettings.footerContent
 const router = useRouter()
 const { proxy } = getCurrentInstance()
