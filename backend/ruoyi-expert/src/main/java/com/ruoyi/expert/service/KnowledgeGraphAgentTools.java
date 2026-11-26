@@ -2,11 +2,14 @@ package com.ruoyi.expert.service;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +21,7 @@ import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.expert.domain.ExpertGraphDimension;
 import com.ruoyi.expert.domain.ExpertProfile;
 import com.ruoyi.expert.domain.ExpertSchedule;
+import com.ruoyi.expert.domain.ExpertUnavailablePeriod;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
 
 /**
@@ -58,7 +62,7 @@ public class KnowledgeGraphAgentTools
     {
         JSONArray tools = new JSONArray();
         tools.add(tool("kg_search_experts",
-                "按能力、产业、区域、项目、成果或技术检索已认证专家，并返回命中的图谱实体。",
+                "第一阶段：以产业为中心，沿行业→专家→关键事实节点检索已认证专家，并返回图谱命中。",
                 objectSchema(
                         Map.of(
                                 "terms", arraySchema("string", "需求关键词，建议 1-8 个"),
@@ -81,7 +85,7 @@ public class KnowledgeGraphAgentTools
                                 "entityIds", arraySchema("number", "实体ID")),
                         List.of())));
         tools.add(tool("expert_check_availability",
-                "执行认证、接单状态、服务区域、服务方式和日期的可用性硬门禁，并返回画像排序依据。",
+                "第二阶段：执行认证、接单、区域、方式和日期硬门禁，并按任务相关30维画像精排。",
                 objectSchema(
                         Map.of(
                                 "expertExternalKey", stringSchema("例如 expert:12"),
@@ -89,10 +93,12 @@ public class KnowledgeGraphAgentTools
                                 "serviceRegion", stringSchema("服务区域，可选"),
                                 "serviceMode", stringSchema("REMOTE/ONSITE/BOTH，可选"),
                                 "industry", stringSchema("目标产业，可选"),
+                                "profileTerms", arraySchema("string",
+                                        "用于匹配30维画像名称和说明的检索词，可选"),
                                 "matchCount", numberSchema("图谱命中数，可选")),
                         List.of("expertExternalKey"))));
         tools.add(tool("expert_filter_available",
-                "对一组候选专家批量执行可用性硬门禁，并只返回通过门禁人员的画像排序依据。",
+                "第二阶段：对图谱候选批量执行硬门禁，并使用相关30维画像进行精排。",
                 objectSchema(
                         Map.of(
                                 "expertExternalKeys", arraySchema("string",
@@ -102,7 +108,9 @@ public class KnowledgeGraphAgentTools
                                 "serviceDate", stringSchema("服务日期 YYYY-MM-DD，可选"),
                                 "serviceRegion", stringSchema("服务区域，可选"),
                                 "serviceMode", stringSchema("REMOTE/ONSITE/BOTH，可选"),
-                                "industry", stringSchema("目标产业，可选")),
+                                "industry", stringSchema("目标产业，可选"),
+                                "profileTerms", arraySchema("string",
+                                        "用于匹配30维画像名称和说明的检索词，可选")),
                         List.of("expertExternalKeys"))));
         return tools;
     }
@@ -156,31 +164,66 @@ public class KnowledgeGraphAgentTools
         }
         int limit = boundedInt(arguments.get("limit"), 8, 1, 20);
         List<Map<String, Object>> rows = neo4j.query("""
-                UNWIND $terms AS term
-                MATCH p=(e:KGNode {entityType: 'Expert'})-[:KG_RELATION*1..3]-(n:KGNode)
-                WHERE e.reviewStatus = 'ACCEPTED'
-                  AND all(r IN relationships(p)
+                MATCH (industry:KGNode {entityType: 'Industry'})
+                      -[ir:KG_RELATION]->
+                      (expert:KGNode {entityType: 'Expert'})
+                WHERE industry.reviewStatus = 'ACCEPTED'
+                  AND expert.reviewStatus = 'ACCEPTED'
+                  AND ir.relationType = 'HAS_EXPERT'
+                  AND coalesce(ir.active, true)
+                  AND ir.reviewStatus = 'ACCEPTED'
+                  AND ir.validTo IS NULL
+                  AND ir.ownerExpertId =
+                      toInteger(split(expert.externalKey, ':')[1])
+                OPTIONAL MATCH (expert)-[rels:KG_RELATION*1..2]->(node:KGNode)
+                WHERE all(r IN rels
                           WHERE coalesce(r.active, true)
                             AND r.reviewStatus = 'ACCEPTED'
                             AND r.validTo IS NULL
                             AND r.ownerExpertId =
-                                toInteger(split(e.externalKey, ':')[1]))
-                  AND all(node IN nodes(p)
-                          WHERE node.entityType <> 'Expert' OR node = e)
-                  AND n.entityType IN $entityTypes
-                  AND (toLower(n.canonicalName) CONTAINS toLower(term)
-                       OR toLower(coalesce(n.propertiesJson, '')) CONTAINS toLower(term))
-                WITH e, n, term
-                WITH e, collect(DISTINCT {
-                    term: term,
-                    entityId: n.entityId,
-                    name: n.canonicalName,
-                    entityType: n.entityType
-                }) AS matched
-                RETURN e.entityId AS expertEntityId,
-                       e.externalKey AS externalKey,
-                       e.canonicalName AS expertName,
-                       e.reviewStatus AS reviewStatus,
+                                toInteger(split(expert.externalKey, ':')[1]))
+                  AND node.entityType IN $entityTypes
+                  AND node.reviewStatus = 'ACCEPTED'
+                WITH expert,
+                     collect(DISTINCT CASE
+                       WHEN any(term IN $terms WHERE
+                           toLower(industry.canonicalName) CONTAINS toLower(term)
+                           OR toLower(coalesce(industry.propertiesJson, '')
+                               ) CONTAINS toLower(term))
+                       THEN {
+                         term: head([term IN $terms WHERE
+                           toLower(industry.canonicalName) CONTAINS toLower(term)
+                           OR toLower(coalesce(industry.propertiesJson, '')
+                               ) CONTAINS toLower(term)]),
+                         entityId: industry.entityId,
+                         name: industry.canonicalName,
+                         entityType: industry.entityType
+                       }
+                       ELSE null END) AS rawIndustries,
+                     collect(DISTINCT CASE
+                       WHEN node IS NOT NULL AND any(term IN $terms WHERE
+                           toLower(node.canonicalName) CONTAINS toLower(term)
+                           OR toLower(coalesce(node.propertiesJson, '')
+                               ) CONTAINS toLower(term))
+                       THEN {
+                         term: head([term IN $terms WHERE
+                           toLower(node.canonicalName) CONTAINS toLower(term)
+                           OR toLower(coalesce(node.propertiesJson, '')
+                               ) CONTAINS toLower(term)]),
+                         entityId: node.entityId,
+                         name: node.canonicalName,
+                         entityType: node.entityType
+                       }
+                       ELSE null END) AS rawNodes
+                WITH expert,
+                     [item IN rawIndustries WHERE item IS NOT NULL] AS industries,
+                     [item IN rawNodes WHERE item IS NOT NULL] AS nodes
+                WITH expert, industries, nodes, industries + nodes AS matched
+                WHERE size(matched) > 0
+                RETURN expert.entityId AS expertEntityId,
+                       expert.externalKey AS externalKey,
+                       expert.canonicalName AS expertName,
+                       expert.reviewStatus AS reviewStatus,
                        size(matched) AS matchCount,
                        matched
                 ORDER BY matchCount DESC, expertName
@@ -205,22 +248,25 @@ public class KnowledgeGraphAgentTools
         int limit = boundedInt(arguments.get("limit"), 20, 1, 50);
         List<Map<String, Object>> rows = neo4j.query("""
                 UNWIND $terms AS term
-                MATCH p=(e:KGNode {entityType: 'Expert', externalKey: $expertKey})
-                        -[:KG_RELATION*1..3]-(n:KGNode)
-                WHERE e.reviewStatus = 'ACCEPTED'
+                MATCH p=(industry:KGNode {entityType: 'Industry'})
+                        -[:KG_RELATION]->
+                        (expert:KGNode {entityType: 'Expert', externalKey: $expertKey})
+                        -[rels:KG_RELATION*1..2]->(node:KGNode)
+                WHERE industry.reviewStatus = 'ACCEPTED'
+                  AND expert.reviewStatus = 'ACCEPTED'
                   AND all(r IN relationships(p)
                           WHERE coalesce(r.active, true)
                             AND r.reviewStatus = 'ACCEPTED'
                             AND r.validTo IS NULL
                             AND r.ownerExpertId =
-                                toInteger(split(e.externalKey, ':')[1]))
-                  AND all(node IN nodes(p)
-                          WHERE node.entityType <> 'Expert' OR node = e)
-                  AND (toLower(n.canonicalName) CONTAINS toLower(term)
-                       OR toLower(coalesce(n.propertiesJson, '')) CONTAINS toLower(term))
-                RETURN n.entityId AS targetEntityId,
-                       n.canonicalName AS targetName,
-                       n.entityType AS targetType,
+                                toInteger(split(expert.externalKey, ':')[1]))
+                  AND node.entityType IN $entityTypes
+                  AND node.reviewStatus = 'ACCEPTED'
+                  AND (toLower(node.canonicalName) CONTAINS toLower(term)
+                       OR toLower(coalesce(node.propertiesJson, '')) CONTAINS toLower(term))
+                RETURN node.entityId AS targetEntityId,
+                       node.canonicalName AS targetName,
+                       node.entityType AS targetType,
                        term,
                        [node IN nodes(p) | {
                            entityId: node.entityId,
@@ -234,7 +280,8 @@ public class KnowledgeGraphAgentTools
                            evidenceCount: rel.evidenceCount
                        }] AS relations
                 LIMIT $limit
-                """, Map.of("expertKey", expertKey, "terms", terms, "limit", limit));
+                """, Map.of("expertKey", expertKey, "terms", terms,
+                        "entityTypes", MATCH_ENTITY_TYPES, "limit", limit));
         JSONObject result = new JSONObject();
         result.put("tool", "kg_find_paths");
         result.put("expertExternalKey", expertKey);
@@ -262,8 +309,10 @@ public class KnowledgeGraphAgentTools
         ExpertProfile profile = platformMapper.selectProfileByUserId(userId);
         List<ExpertSchedule> schedules = profile == null ? List.of()
                 : platformMapper.selectScheduleByUserId(userId);
+        List<ExpertUnavailablePeriod> unavailablePeriods = profile == null ? List.of()
+                : platformMapper.selectUnavailablePeriodsByUserId(userId);
         List<ExpertGraphDimension> dimensions = profile == null ? List.of()
-                : dimensionViewService.dimensions(userId, "APPROVED");
+                : dimensionViewService.dimensions(userId, "DRAFT");
         JSONArray checks = new JSONArray();
         JSONObject result = new JSONObject();
         result.put("tool", "expert_check_availability");
@@ -274,6 +323,7 @@ public class KnowledgeGraphAgentTools
             result.put("reviewStatus", profile.getReviewStatus());
             result.put("serviceStatus", profile.getServiceStatus());
             result.put("schedules", schedules);
+            result.put("unavailablePeriods", unavailablePeriods);
         }
         boolean eligible = profile != null;
         eligible &= gate(checks, "PROFILE", profile != null,
@@ -325,17 +375,35 @@ public class KnowledgeGraphAgentTools
             result.put("matchedSchedules", schedules.stream()
                     .filter(item -> date != null && scheduleCovers(item, date, serviceMode))
                     .toList());
+            List<ExpertUnavailablePeriod> unavailableOnDate = unavailablePeriods.stream()
+                    .filter(item -> date != null && unavailableOnDate(item, date))
+                    .toList();
+            boolean temporarilyUnavailable = !unavailableOnDate.isEmpty();
+            eligible &= gate(checks, "TEMPORARY_UNAVAILABILITY",
+                    !temporarilyUnavailable,
+                    temporarilyUnavailable
+                            ? serviceDate + " 处于专家临时不可用时段"
+                            : serviceDate + " 无临时不可用冲突");
+            result.put("temporarilyUnavailable", temporarilyUnavailable);
+            result.put("unavailablePeriodsOnDate", unavailableOnDate);
         }
 
-        double profileScore = averageProfileScore(dimensions);
+        List<String> profileTerms = stringList(arguments.get("profileTerms"));
+        JSONArray matchedDimensions = matchingDimensions(dimensions, profileTerms);
+        double profileScore = matchedDimensions.isEmpty()
+                ? averageProfileScore(dimensions) : averageProfileScore(matchedDimensions);
         double profileConfidence = averageConfidence(dimensions);
         double coverage = coverage(dimensions);
         int matchCount = Math.max(0, arguments.getIntValue("matchCount"));
         double semanticFit = Math.min(5, matchCount) * 20.0;
-        double rankingScore = profileScore * 0.6 + semanticFit * 0.3 + coverage * 0.1;
+        double rankingScore = profileScore * 0.65
+                + semanticFit * 0.25 + profileConfidence * 0.1;
         result.put("hardGateEligible", eligible);
         result.put("gateChecks", checks);
         result.put("profileScore", round(profileScore));
+        result.put("profileScoreScope",
+                matchedDimensions.isEmpty() ? "ALL_DIMENSIONS" : "MATCHED_DIMENSIONS");
+        result.put("profileDimensionMatches", matchedDimensions);
         result.put("profileConfidence", round(profileConfidence));
         result.put("profileCoverage", round(coverage));
         result.put("graphMatchCount", matchCount);
@@ -359,6 +427,7 @@ public class KnowledgeGraphAgentTools
             itemArguments.put("serviceRegion", arguments.getString("serviceRegion"));
             itemArguments.put("serviceMode", arguments.getString("serviceMode"));
             itemArguments.put("industry", arguments.getString("industry"));
+            itemArguments.put("profileTerms", arguments.get("profileTerms"));
             Object matchCount = index < matchCounts.size() ? matchCounts.get(index) : null;
             itemArguments.put("matchCount", matchCount instanceof Number number
                     ? number.intValue() : 0);
@@ -427,6 +496,40 @@ public class KnowledgeGraphAgentTools
         }
     }
 
+    private static boolean unavailableOnDate(ExpertUnavailablePeriod period, LocalDate date)
+    {
+        LocalDateTime start = parseDateTime(period.getStartTime());
+        LocalDateTime end = parseDateTime(period.getEndTime());
+        if (start == null || end == null)
+        {
+            return false;
+        }
+        LocalDateTime dayStart = date.atStartOfDay();
+        LocalDateTime dayEnd = date.plusDays(1).atStartOfDay();
+        return start.isBefore(dayEnd) && end.isAfter(dayStart);
+    }
+
+    private static LocalDateTime parseDateTime(String value)
+    {
+        if (StringUtils.isEmpty(value))
+        {
+            return null;
+        }
+        String normalized = value.trim().replace('T', ' ');
+        for (String pattern : List.of("yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm"))
+        {
+            try
+            {
+                return LocalDateTime.parse(normalized, DateTimeFormatter.ofPattern(pattern));
+            }
+            catch (DateTimeParseException ignored)
+            {
+                // 尝试下一种允许的输入格式。
+            }
+        }
+        return null;
+    }
+
     private static boolean regionMatches(String expertValue, String requestedValue)
     {
         String expert = normalizeText(expertValue);
@@ -443,6 +546,60 @@ public class KnowledgeGraphAgentTools
                         || "CONFLICT".equals(item.getDataStatus()))
                 .mapToDouble(item -> number(item.getScore()))
                 .average().orElse(0);
+    }
+
+    private static JSONArray matchingDimensions(List<ExpertGraphDimension> dimensions,
+            List<String> profileTerms)
+    {
+        JSONArray matched = new JSONArray();
+        if (profileTerms == null || profileTerms.isEmpty())
+        {
+            return matched;
+        }
+        for (ExpertGraphDimension dimension : dimensions)
+        {
+            if (!"AVAILABLE".equals(dimension.getDataStatus())
+                    && !"CONFLICT".equals(dimension.getDataStatus()))
+            {
+                continue;
+            }
+            String searchable = ((dimension.getDimensionName() == null
+                    ? "" : dimension.getDimensionName()) + " "
+                    + (dimension.getDescription() == null
+                    ? "" : dimension.getDescription())).toLowerCase(Locale.ROOT);
+            List<String> hits = profileTerms.stream()
+                    .map(String::trim)
+                    .filter(term -> !term.isEmpty()
+                            && searchable.contains(term.toLowerCase(Locale.ROOT)))
+                    .distinct()
+                    .toList();
+            if (hits.isEmpty())
+            {
+                continue;
+            }
+            JSONObject item = new JSONObject();
+            item.put("dimensionCode", dimension.getDimensionCode());
+            item.put("dimensionName", dimension.getDimensionName());
+            item.put("score", dimension.getScore());
+            item.put("confidence", dimension.getConfidence());
+            item.put("matchedTerms", hits);
+            matched.add(item);
+        }
+        return matched;
+    }
+
+    private static double averageProfileScore(JSONArray dimensions)
+    {
+        if (dimensions == null || dimensions.isEmpty())
+        {
+            return 0;
+        }
+        double total = 0;
+        for (int index = 0; index < dimensions.size(); index++)
+        {
+            total += number(dimensions.getJSONObject(index).get("score"));
+        }
+        return total / dimensions.size();
     }
 
     private static double averageConfidence(List<ExpertGraphDimension> dimensions)

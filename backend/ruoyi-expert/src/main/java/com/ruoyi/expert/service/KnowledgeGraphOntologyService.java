@@ -15,8 +15,8 @@ import com.ruoyi.common.exception.ServiceException;
 @Service
 public class KnowledgeGraphOntologyService
 {
-    public static final String ONTOLOGY_VERSION = "expert-domain-v2";
-    public static final String RESOURCE_PATH = "knowledge-graph/ontology-v2.json";
+    public static final String ONTOLOGY_VERSION = "expert-domain-v3";
+    public static final String RESOURCE_PATH = "knowledge-graph/ontology-v3.json";
 
     private volatile JSONObject ontology;
 

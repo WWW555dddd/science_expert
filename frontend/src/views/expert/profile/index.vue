@@ -2,8 +2,37 @@
   <div class="app-container" v-loading="loading">
     <el-row :gutter="16">
       <el-col :xs="24" :lg="15">
-        <el-card shadow="never" header="专家基本档案">
+        <el-card shadow="never">
+          <template #header>
+            <div class="profile-card-header">
+              <span>专家基本档案</span>
+              <div class="word-import-actions">
+                <el-button plain icon="Download" @click="downloadWordTemplate">下载Word模板</el-button>
+                <el-upload
+                  :action="wordImportAction"
+                  :headers="uploadHeaders"
+                  :show-file-list="false"
+                  accept=".docx"
+                  :before-upload="beforeWordImport"
+                  :on-success="handleWordImportSuccess"
+                  :on-error="handleWordImportError"
+                  v-hasPermi="['expert:profile:edit']"
+                >
+                  <el-button type="primary" plain icon="Upload" :loading="wordImporting">
+                    导入Word模板
+                  </el-button>
+                </el-upload>
+              </div>
+            </div>
+          </template>
           <el-form ref="profileRef" :model="profileForm" :rules="rules" label-width="96px">
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              title="可下载标准Word模板填写专家基本信息。导入后只会回填当前表单，请核对内容并点击“保存档案”。"
+              class="word-import-tip"
+            />
             <el-row :gutter="16">
               <el-col :sm="12">
                 <el-form-item label="专家姓名" prop="realName">
@@ -76,80 +105,51 @@
       </el-col>
     </el-row>
 
-    <el-card shadow="never" class="schedule-card" header="可服务时间表">
-      <div class="schedule-toolbar">
-        <div>
-          <p>时间表是专家接单匹配的必要字段。请按周设置可服务时段和每周承接上限。</p>
-        </div>
-        <el-button type="primary" plain icon="Plus" @click="addSchedule">添加时段</el-button>
-      </div>
-      <el-table :data="scheduleForm" border>
-        <el-table-column label="星期" width="130">
-          <template #default="{ row }">
-            <el-select v-model="row.weekday" placeholder="星期">
-              <el-option v-for="day in weekdays" :key="day.value" :label="day.label" :value="day.value" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="开始时间" width="150">
-          <template #default="{ row }">
-            <el-time-picker v-model="row.startTime" value-format="HH:mm" format="HH:mm" placeholder="开始" />
-          </template>
-        </el-table-column>
-        <el-table-column label="结束时间" width="150">
-          <template #default="{ row }">
-            <el-time-picker v-model="row.endTime" value-format="HH:mm" format="HH:mm" placeholder="结束" />
-          </template>
-        </el-table-column>
-        <el-table-column label="服务方式" width="140">
-          <template #default="{ row }">
-            <el-select v-model="row.serviceMode">
-              <el-option label="远程" value="REMOTE" />
-              <el-option label="现场" value="ONSITE" />
-              <el-option label="均可" value="BOTH" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="每周承接上限" width="140">
-          <template #default="{ row }">
-            <el-input-number v-model="row.weeklyCapacity" :min="1" :max="20" controls-position="right" />
-          </template>
-        </el-table-column>
-        <el-table-column label="生效日期" width="170">
-          <template #default="{ row }">
-            <el-date-picker v-model="row.effectiveFrom" type="date" value-format="YYYY-MM-DD" placeholder="生效日期" />
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="80" align="center">
-          <template #default="{ $index }">
-            <el-button link type="danger" icon="Delete" @click="removeSchedule($index)" />
-          </template>
-        </el-table-column>
-      </el-table>
+    <el-card shadow="never" class="schedule-card" header="我的时间安排">
+      <ExpertScheduleGantt
+        v-model="scheduleForm"
+        date-mode
+        :unavailable-periods="unavailablePeriods"
+        :occupancy-periods="occupancyPeriods"
+        @refresh-occupancy="loadOccupancy"
+      />
       <div class="form-actions">
-        <el-button type="success" v-hasPermi="['expert:profile:edit']" @click="saveSchedule">保存时间表</el-button>
+        <el-button type="success" v-hasPermi="['expert:profile:edit']" @click="saveSchedule">保存日常可联系时段</el-button>
       </div>
+      <ExpertUnavailablePeriods @update:periods="handleUnavailablePeriods" />
+    </el-card>
+
+    <el-card shadow="never" class="schedule-card">
+      <ExpertVersionHistory />
     </el-card>
   </div>
 </template>
 
 <script setup name="ExpertProfile">
-import { getExpertProfile, getExpertSchedules, saveExpertProfile, saveExpertSchedules } from "@/api/expert/platform"
+import {
+  downloadExpertProfileImportTemplate,
+  getExpertProfile,
+  getExpertSchedules,
+  getExpertOccupancyPeriods,
+  saveExpertProfile,
+  saveExpertSchedules
+} from "@/api/expert/platform"
+import Download from "@/plugins/download"
+import { getToken } from "@/utils/auth"
+import ExpertScheduleGantt from "@/components/ExpertScheduleGantt/index.vue"
+import ExpertUnavailablePeriods from "@/components/ExpertUnavailablePeriods/index.vue"
+import ExpertVersionHistory from "@/components/ExpertVersionHistory/index.vue"
 
 const { proxy } = getCurrentInstance()
 const loading = ref(false)
+const wordImporting = ref(false)
 const profileRef = ref()
 const profileForm = ref({})
 const scheduleForm = ref([])
-const weekdays = [
-  { label: "星期一", value: 1 },
-  { label: "星期二", value: 2 },
-  { label: "星期三", value: 3 },
-  { label: "星期四", value: 4 },
-  { label: "星期五", value: 5 },
-  { label: "星期六", value: 6 },
-  { label: "星期日", value: 7 }
-]
+const unavailablePeriods = ref([])
+const occupancyPeriods = ref([])
+const wordImportAction = import.meta.env.VITE_APP_BASE_API + "/expert/workspace/profile/import"
+const uploadHeaders = computed(() => ({ Authorization: "Bearer " + getToken() }))
 const rules = {
   realName: [{ required: true, message: "专家姓名不能为空", trigger: "blur" }],
   email: [{ type: "email", message: "电子邮箱格式不正确", trigger: "blur" }]
@@ -165,23 +165,45 @@ const serviceStatusText = computed(() => ({
   AVAILABLE: "正常接单",
   PAUSED: "暂停接单",
   PENDING_CERTIFICATION: "待认证，暂不能接单",
+    CREDIT_BLOCKED: "信誉不足，禁止接单",
   LIMITED: "暂停接单（历史状态）",
   EXITED: "已退出"
 })[profileForm.value.serviceStatus] || "待认证，暂不能接单")
 
 function loadData() {
   loading.value = true
-  Promise.all([getExpertProfile(), getExpertSchedules()])
+  Promise.all([getExpertProfile(), getExpertSchedules(), loadOccupancy()])
     .then(([profileRes, scheduleRes]) => {
       profileForm.value = profileRes.data || {}
       scheduleForm.value = scheduleRes.data || []
-      if (!scheduleForm.value.length) {
-        addSchedule()
-      }
     })
     .finally(() => {
       loading.value = false
     })
+}
+
+function loadOccupancy() {
+  const start = new Date()
+  const end = new Date()
+  start.setDate(start.getDate() - 365)
+  end.setDate(end.getDate() + 365)
+  return getExpertOccupancyPeriods(
+    `${formatDate(start)} 00:00:00`,
+    `${formatDate(end)} 23:59:59`
+  ).then(res => {
+    occupancyPeriods.value = res.data || []
+  })
+}
+
+function handleUnavailablePeriods(periods) {
+  unavailablePeriods.value = periods || []
+}
+
+function formatDate(date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function saveProfile() {
@@ -194,24 +216,60 @@ function saveProfile() {
   })
 }
 
-function addSchedule() {
-  scheduleForm.value.push({
-    weekday: 1,
-    startTime: "09:00",
-    endTime: "17:00",
-    serviceMode: "REMOTE",
-    weeklyCapacity: 1,
-    effectiveFrom: new Date().toISOString().slice(0, 10)
-  })
+async function downloadWordTemplate() {
+  try {
+    const blob = await downloadExpertProfileImportTemplate()
+    Download.saveAs(blob, "专家信息导入模板.docx")
+  }
+  catch {
+    proxy.$modal.msgError("Word模板下载失败")
+  }
 }
 
-function removeSchedule(index) {
-  scheduleForm.value.splice(index, 1)
+function beforeWordImport(file) {
+  if (!file.name.toLowerCase().endsWith(".docx")) {
+    proxy.$modal.msgError("仅支持.docx格式的Word模板")
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    proxy.$modal.msgError("Word模板不能超过5MB")
+    return false
+  }
+  wordImporting.value = true
+  return true
+}
+
+function handleWordImportSuccess(response) {
+  wordImporting.value = false
+  if (response.code !== 200) {
+    proxy.$modal.msgError(response.msg || "Word模板导入失败")
+    return
+  }
+  const imported = response.data?.profile || {}
+  const fields = response.data?.recognizedFields || []
+  const updates = Object.fromEntries(
+    fields
+      .filter(field => imported[field] != null)
+      .map(field => [field, imported[field]])
+  )
+  profileForm.value = { ...profileForm.value, ...updates }
+  profileRef.value?.clearValidate()
+  const count = fields.length
+  proxy.$modal.msgSuccess(`已识别 ${count} 个字段，请核对后保存档案`)
+}
+
+function handleWordImportError() {
+  wordImporting.value = false
+  proxy.$modal.msgError("Word模板导入失败，请确认文件格式和内容")
 }
 
 function saveSchedule() {
+  if (!scheduleForm.value.length) {
+    proxy.$modal.msgWarning("请至少设置一个日常可联系时段")
+    return
+  }
   saveExpertSchedules(scheduleForm.value).then(() => {
-    proxy.$modal.msgSuccess("可服务时间表已保存")
+    proxy.$modal.msgSuccess("日常可联系时段已保存")
     loadData()
   })
 }
@@ -222,6 +280,20 @@ loadData()
 <style scoped lang="scss">
 .schedule-card {
   margin-top: 16px;
+}
+.profile-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.word-import-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.word-import-tip {
+  margin-bottom: 18px;
 }
 .completion {
   display: flex;
@@ -234,16 +306,6 @@ loadData()
     margin: 0;
     color: #7b8794;
     line-height: 1.7;
-  }
-}
-.schedule-toolbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-  p {
-    margin: 0;
-    color: #7b8794;
   }
 }
 .form-actions {

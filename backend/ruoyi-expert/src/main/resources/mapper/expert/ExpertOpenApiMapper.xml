@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertOpenApiMapper">
+
+    <resultMap id="BusinessContextResult" type="ExpertBusinessContextSnapshot">
+        <id property="contextId" column="context_id"/>
+        <result property="userId" column="expert_user_id"/>
+        <result property="externalTaskId" column="external_task_id"/>
+        <result property="taskType" column="task_type"/>
+        <result property="serviceStart" column="service_start"/>
+        <result property="serviceEnd" column="service_end"/>
+        <result property="serviceMode" column="service_mode"/>
+        <result property="serviceRegion" column="service_region"/>
+        <result property="industry" column="industry"/>
+        <result property="occupancyStatus" column="occupancy_status"/>
+        <result property="conflictStatus" column="conflict_status"/>
+        <result property="sourceSystem" column="source_system"/>
+        <result property="sourceKind" column="source_kind"/>
+        <result property="sourceVersion" column="source_version"/>
+        <result property="verifiedAt" column="verified_at"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ServiceEvidenceResult" type="ExpertServiceEvidence">
+        <id property="evidenceId" column="evidence_id"/>
+        <result property="sourceEventId" column="source_event_id"/>
+        <result property="userId" column="expert_user_id"/>
+        <result property="evidenceType" column="evidence_type"/>
+        <result property="externalTaskId" column="external_task_id"/>
+        <result property="sourceSystem" column="source_system"/>
+        <result property="sourceKind" column="source_kind"/>
+        <result property="occurredAt" column="occurred_at"/>
+        <result property="title" column="title"/>
+        <result property="summary" column="summary"/>
+        <result property="rawPayload" column="raw_payload"/>
+        <result property="sourceDigest" column="source_digest"/>
+        <result property="processingStatus" column="processing_status"/>
+        <result property="receivedBy" column="received_by"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <select id="selectOverlappingBusinessContexts" resultMap="BusinessContextResult">
+        select context_id, expert_user_id, external_task_id, task_type,
+               service_start, service_end, service_mode, service_region, industry,
+               occupancy_status, conflict_status, source_system, source_kind,
+               source_version, verified_at, create_by, create_time, update_by, update_time
+        from expert_business_context_snapshot
+        where expert_user_id = #{userId}
+          and service_start &lt; #{serviceEnd}
+          and service_end &gt; #{serviceStart}
+          and occupancy_status in ('FREE', 'OCCUPIED', 'BLOCKED')
+        order by verified_at desc, context_id desc
+    </select>
+
+    <select id="selectServiceEvidenceBySourceEventId" resultMap="ServiceEvidenceResult">
+        select evidence_id, source_event_id, expert_user_id, evidence_type,
+               external_task_id, source_system, source_kind, occurred_at,
+               title, summary, raw_payload, source_digest, processing_status,
+               received_by, create_by, create_time, update_by, update_time
+        from expert_service_evidence
+        where source_event_id = #{sourceEventId}
+        limit 1
+    </select>
+
+    <select id="selectRecentServiceEvidenceByUserId" resultMap="ServiceEvidenceResult">
+        select evidence_id, source_event_id, expert_user_id, evidence_type,
+               external_task_id, source_system, source_kind, occurred_at,
+               title, summary, raw_payload, source_digest, processing_status,
+               received_by, create_by, create_time, update_by, update_time
+        from expert_service_evidence
+        where expert_user_id = #{userId}
+        order by occurred_at desc, evidence_id desc
+        limit #{limit}
+    </select>
+
+    <insert id="insertServiceEvidence" parameterType="ExpertServiceEvidence"
+            useGeneratedKeys="true" keyProperty="evidenceId">
+        insert into expert_service_evidence
+            (source_event_id, expert_user_id, evidence_type, external_task_id,
+             source_system, source_kind, occurred_at, title, summary, raw_payload,
+             source_digest, processing_status, received_by, create_by, create_time)
+        values
+            (#{sourceEventId}, #{userId}, #{evidenceType}, #{externalTaskId},
+             #{sourceSystem}, #{sourceKind}, #{occurredAt}, #{title}, #{summary},
+             #{rawPayload}, #{sourceDigest}, #{processingStatus}, #{receivedBy},
+             #{createBy}, sysdate())
+    </insert>
+
+    <update id="updateServiceEvidenceStatus">
+        update expert_service_evidence
+        set processing_status = #{processingStatus}, update_time = sysdate()
+        where evidence_id = #{evidenceId}
+    </update>
+</mapper>

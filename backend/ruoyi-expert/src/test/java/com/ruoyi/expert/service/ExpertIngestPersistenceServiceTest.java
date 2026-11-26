@@ -101,7 +101,7 @@ class ExpertIngestPersistenceServiceTest
         order.verify(platformMapper).selectMaterialById(13L);
         order.verify(platformMapper).selectLatestMaterialByUserIdAndCategory(12L, "IDENTITY");
         order.verify(platformMapper).markProfilePendingIfNotApproved(12L);
-        verify(dimensionAggregationService).rebuildDraft(profile);
+        verify(dimensionAggregationService).recordAndAggregate(profile, 13L, null, false);
     }
 
     @Test
@@ -147,9 +147,7 @@ class ExpertIngestPersistenceServiceTest
                 17L, "current", 16L, "REVIEW_PENDING", "PENDING",
                 0, 1, "no evidence", false, List.of(), null, null, null));
 
-        verify(graphFactPersistenceService).persistDimensionAssessments(
-                16L, 17L, null, false);
-        verify(dimensionAggregationService).rebuildDraft(profile);
+        verify(dimensionAggregationService).recordAndAggregate(profile, 17L, null, false);
     }
 
     @Test
@@ -178,9 +176,7 @@ class ExpertIngestPersistenceServiceTest
                 19L, "current", 18L, "REVIEW_PENDING", "PENDING",
                 0, 0, "scored", false, List.of(), analysis, null, null));
 
-        verify(graphFactPersistenceService).persistDimensionAssessments(
-                18L, 19L, analysis, false);
-        verify(dimensionAggregationService).rebuildDraft(profile);
+        verify(dimensionAggregationService).recordAndAggregate(profile, 19L, analysis, false);
     }
 
     private static ExpertProfile readyProfile(Long userId)

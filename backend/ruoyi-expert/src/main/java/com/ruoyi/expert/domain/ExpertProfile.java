@@ -27,6 +27,7 @@ public class ExpertProfile extends BaseEntity
     private String careerSummary;
     private String reviewStatus;
     private String serviceStatus;
+    private Integer creditScore;
     private Integer profileCompletion;
     private Integer graphVersion;
     private Integer version;
@@ -196,6 +197,16 @@ public class ExpertProfile extends BaseEntity
     public void setServiceStatus(String serviceStatus)
     {
         this.serviceStatus = serviceStatus;
+    }
+
+    public Integer getCreditScore()
+    {
+        return creditScore;
+    }
+
+    public void setCreditScore(Integer creditScore)
+    {
+        this.creditScore = creditScore;
     }
 
     public Integer getProfileCompletion()

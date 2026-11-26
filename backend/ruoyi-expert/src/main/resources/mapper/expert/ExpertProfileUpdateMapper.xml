@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertProfileUpdateMapper">
+
+    <resultMap id="SuggestionResult" type="ExpertProfileUpdateSuggestion">
+        <id property="suggestionId" column="suggestion_id"/>
+        <result property="evidenceId" column="evidence_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="realName" column="real_name"/>
+        <result property="status" column="status"/>
+        <result property="summary" column="summary"/>
+        <result property="reviewedSummary" column="reviewed_summary"/>
+        <result property="confidence" column="confidence"/>
+        <result property="generationMode" column="generation_mode"/>
+        <result property="promptVersion" column="prompt_version"/>
+        <result property="modelName" column="model_name"/>
+        <result property="agentOutputJson" column="agent_output_json"/>
+        <result property="reviewerId" column="reviewer_id"/>
+        <result property="reviewerName" column="reviewer_name"/>
+        <result property="reviewComment" column="review_comment"/>
+        <result property="releaseId" column="release_id"/>
+        <result property="version" column="version"/>
+        <result property="createTime" column="create_time"/>
+        <result property="resolvedTime" column="resolved_time"/>
+    </resultMap>
+
+    <resultMap id="SuggestionItemResult" type="ExpertProfileUpdateSuggestionItem">
+        <id property="itemId" column="item_id"/>
+        <result property="suggestionId" column="suggestion_id"/>
+        <result property="dimensionCode" column="dimension_code"/>
+        <result property="dimensionName" column="dimension_name"/>
+        <result property="beforeScore" column="before_score"/>
+        <result property="suggestedScore" column="suggested_score"/>
+        <result property="approvedScore" column="approved_score"/>
+        <result property="reason" column="reason"/>
+        <result property="reviewedReason" column="reviewed_reason"/>
+        <result property="evidence" column="evidence"/>
+        <result property="confidence" column="confidence"/>
+    </resultMap>
+
+    <insert id="insertSuggestion" parameterType="ExpertProfileUpdateSuggestion"
+            useGeneratedKeys="true" keyProperty="suggestionId">
+        insert into expert_profile_update_suggestion
+            (evidence_id, user_id, status, summary, confidence, generation_mode,
+             prompt_version, model_name, agent_output_json, version,
+             create_time, update_time)
+        values
+            (#{evidenceId}, #{userId}, #{status}, #{summary}, #{confidence},
+             #{generationMode}, #{promptVersion}, #{modelName}, #{agentOutputJson}, 0,
+             sysdate(), sysdate())
+    </insert>
+
+    <insert id="insertItem" parameterType="ExpertProfileUpdateSuggestionItem"
+            useGeneratedKeys="true" keyProperty="itemId">
+        insert into expert_profile_update_suggestion_item
+            (suggestion_id, dimension_code, dimension_name, before_score,
+             suggested_score, reason, evidence, confidence, create_time)
+        values
+            (#{suggestionId}, #{dimensionCode}, #{dimensionName}, #{beforeScore},
+             #{suggestedScore}, #{reason}, #{evidence}, #{confidence}, sysdate())
+    </insert>
+
+    <select id="selectByEvidenceId" resultMap="SuggestionResult">
+        select suggestion_id, evidence_id, user_id, status, summary, reviewed_summary,
+               confidence,
+               generation_mode, prompt_version, model_name, agent_output_json,
+               reviewer_id, reviewer_name, review_comment, release_id, version,
+               create_time, resolved_time
+        from expert_profile_update_suggestion
+        where evidence_id = #{evidenceId}
+        limit 1
+    </select>
+
+    <select id="selectById" resultMap="SuggestionResult">
+        select s.suggestion_id, s.evidence_id, s.user_id, p.real_name,
+               s.status, s.summary, s.reviewed_summary, s.confidence, s.generation_mode,
+               s.prompt_version, s.model_name, s.agent_output_json,
+               s.reviewer_id, s.reviewer_name,
+               s.review_comment, s.release_id, s.version, s.create_time, s.resolved_time
+        from expert_profile_update_suggestion s
+        left join expert_profile p on p.user_id = s.user_id
+        where s.suggestion_id = #{suggestionId}
+    </select>
+
+    <select id="selectByIdForUpdate" resultMap="SuggestionResult">
+        select s.suggestion_id, s.evidence_id, s.user_id, p.real_name,
+               s.status, s.summary, s.reviewed_summary, s.confidence, s.generation_mode,
+               s.prompt_version, s.model_name, s.agent_output_json,
+               s.reviewer_id, s.reviewer_name,
+               s.review_comment, s.release_id, s.version, s.create_time, s.resolved_time
+        from expert_profile_update_suggestion s
+        left join expert_profile p on p.user_id = s.user_id
+        where s.suggestion_id = #{suggestionId}
+        for update
+    </select>
+
+    <select id="selectList" resultMap="SuggestionResult">
+        select s.suggestion_id, s.evidence_id, s.user_id, p.real_name,
+               s.status, s.summary, s.reviewed_summary, s.confidence, s.generation_mode,
+               s.prompt_version, s.model_name, s.agent_output_json,
+               s.reviewer_id, s.reviewer_name,
+               s.review_comment, s.release_id, s.version, s.create_time, s.resolved_time
+        from expert_profile_update_suggestion s
+        left join expert_profile p on p.user_id = s.user_id
+        <where>
+            <if test="status != null and status != ''">
+                s.status = #{status}
+            </if>
+        </where>
+        order by s.create_time desc, s.suggestion_id desc
+    </select>
+
+    <select id="selectApprovedByUserId" resultMap="SuggestionResult">
+        select s.suggestion_id, s.evidence_id, s.user_id, p.real_name,
+               s.status, s.summary, s.reviewed_summary, s.confidence, s.generation_mode,
+               s.prompt_version, s.model_name, s.agent_output_json,
+               s.reviewer_id, s.reviewer_name, s.review_comment, s.release_id,
+               s.version, s.create_time, s.resolved_time
+        from expert_profile_update_suggestion s
+        left join expert_profile p on p.user_id = s.user_id
+        where s.user_id = #{userId}
+          and s.status = 'APPROVED'
+        order by s.resolved_time desc, s.suggestion_id desc
+        limit #{limit}
+    </select>
+
+    <select id="selectItems" resultMap="SuggestionItemResult">
+        select item_id, suggestion_id, dimension_code, dimension_name, before_score,
+               suggested_score, approved_score, reason, reviewed_reason,
+               evidence, confidence
+        from expert_profile_update_suggestion_item
+        where suggestion_id = #{suggestionId}
+        order by item_id
+    </select>
+
+    <update id="updateItemApprovedScore">
+        update expert_profile_update_suggestion_item
+        set approved_score = #{approvedScore}
+        where item_id = #{itemId}
+    </update>
+
+    <update id="updateReviewedSummary">
+        update expert_profile_update_suggestion
+        set reviewed_summary = #{reviewedSummary},
+            update_time = sysdate()
+        where suggestion_id = #{suggestionId}
+          and status = 'PENDING'
+    </update>
+
+    <update id="updateItemReviewedReason">
+        update expert_profile_update_suggestion_item
+        set reviewed_reason = #{reviewedReason}
+        where item_id = #{itemId}
+    </update>
+
+    <update id="touchPendingSuggestion">
+        update expert_profile_update_suggestion
+        set version = version + 1,
+            update_time = sysdate()
+        where suggestion_id = #{suggestionId}
+          and status = 'PENDING'
+          and version = #{version}
+    </update>
+
+    <update id="resolveSuggestion">
+        update expert_profile_update_suggestion
+        set status = #{status},
+            reviewer_id = #{reviewerId,jdbcType=BIGINT},
+            reviewer_name = #{reviewerName,jdbcType=VARCHAR},
+            review_comment = #{comment,jdbcType=VARCHAR},
+            release_id = #{releaseId,jdbcType=BIGINT},
+            version = version + 1,
+            resolved_time = sysdate(),
+            update_time = sysdate()
+        where suggestion_id = #{suggestionId}
+          and status = 'PENDING'
+          and version = #{version}
+    </update>
+
+    <update id="updateProfileGraphVersion">
+        update expert_profile
+        set graph_version = #{graphVersion}, update_time = sysdate()
+        where user_id = #{userId} and del_flag = '0'
+    </update>
+</mapper>

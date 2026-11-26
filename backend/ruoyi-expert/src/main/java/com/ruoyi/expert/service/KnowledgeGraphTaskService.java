@@ -40,8 +40,7 @@ public class KnowledgeGraphTaskService
             String industry, String requiredCapabilities, List<String> suggestedTerms)
     {
         ontologyService.requireEntityType("Task");
-        List<String> capabilities = resolveCapabilities(requiredCapabilities, industry,
-                suggestedTerms);
+        List<String> capabilities = resolveCapabilities(requiredCapabilities, suggestedTerms);
         Map<String, Object> taskProperties = new LinkedHashMap<>();
         taskProperties.put("title", abbreviate(objective, 255));
         taskProperties.put("objective", abbreviateLong(objective));
@@ -54,19 +53,23 @@ public class KnowledgeGraphTaskService
 
         Long taskId = upsertEntity("Task", "task:" + runId,
                 abbreviate(objective, 255), taskProperties, "ACCEPTED");
-        Map<String, String> canonicalCapabilities = new LinkedHashMap<>();
-        for (Map<String, Object> mapping : graphMapper.selectCapabilityMappings())
-        {
-            canonicalCapabilities.put(
-                    String.valueOf(mapping.get("capabilityName")).toLowerCase(Locale.ROOT),
-                    String.valueOf(mapping.get("capabilityName")));
-        }
         int relationCount = 0;
+        if (industry != null && !industry.isBlank())
+        {
+            String industryName = abbreviate(industry.trim(), 128);
+            Map<String, Object> industryProperties = new LinkedHashMap<>();
+            industryProperties.put("name", industryName);
+            industryProperties.put("requirementSource", "MATCH_REQUEST");
+            Long industryId = upsertEntity("Industry",
+                    "industry:" + sha256(normalize(industryName)),
+                    industryName, industryProperties, "ACCEPTED");
+            relationCount += link(taskId, "Task", "TARGETS_INDUSTRY",
+                    "Industry", industryId, runId, objective, industryName);
+        }
         Set<String> canonicalRequiredCapabilities = new LinkedHashSet<>();
         for (String capability : capabilities)
         {
-            canonicalRequiredCapabilities.add(
-                    canonicalCapability(capability, canonicalCapabilities));
+            canonicalRequiredCapabilities.add(capability);
         }
         for (String capability : canonicalRequiredCapabilities)
         {
@@ -76,8 +79,8 @@ public class KnowledgeGraphTaskService
             Long capabilityId = upsertEntity("Capability",
                     "capability:" + sha256(normalize(capability)),
                     capability, capabilityProperties, "ACCEPTED");
-            relationCount += link(taskId, capabilityId, runId, objective,
-                    capability);
+            relationCount += link(taskId, "Task", "REQUIRES_CAPABILITY",
+                    "Capability", capabilityId, runId, objective, capability);
         }
         outboxService.enqueue("TASK_CREATED", "TASK", taskId,
                 Map.of("taskEntityId", taskId, "runId", runId));
@@ -91,55 +94,39 @@ public class KnowledgeGraphTaskService
         return result;
     }
 
-    private static String canonicalCapability(String requested,
-            Map<String, String> canonicalCapabilities)
+    private int link(Long taskId, String sourceType, String relationType,
+            String targetType, Long targetId, String runId, String objective,
+            String requirement)
     {
-        String normalized = normalize(requested);
-        for (Map.Entry<String, String> entry : canonicalCapabilities.entrySet())
-        {
-            String canonicalNormalized = normalize(entry.getKey());
-            if (normalized.equals(canonicalNormalized)
-                    || normalized.contains(canonicalNormalized)
-                    || canonicalNormalized.contains(normalized))
-            {
-                return entry.getValue();
-            }
-        }
-        return requested;
-    }
-
-    private int link(Long taskId, Long capabilityId, String runId, String objective,
-            String capability)
-    {
-        ontologyService.requireRelationType("REQUIRES_CAPABILITY", "Task", "Capability");
+        ontologyService.requireRelationType(relationType, sourceType, targetType);
         Map<String, Object> relation = new LinkedHashMap<>();
         relation.put("sourceEntityId", taskId);
-        relation.put("relationType", "REQUIRES_CAPABILITY");
-        relation.put("targetEntityId", capabilityId);
+        relation.put("relationType", relationType);
+        relation.put("targetEntityId", targetId);
         relation.put("confidence", 1.0);
         relation.put("reviewStatus", "ACCEPTED");
         relation.put("ontologyVersion", KnowledgeGraphOntologyService.ONTOLOGY_VERSION);
         relation.put("sourceKind", "MANUAL_REQUEST");
         relation.put("propertiesJson", JSON.toJSONString(Map.of(
                 "agentRunId", runId,
-                "requirement", capability)));
+                "requirement", requirement)));
         graphMapper.upsertRelation(relation);
         Long relationId = graphMapper.selectRelationId(
-                taskId, "REQUIRES_CAPABILITY", capabilityId);
+                taskId, relationType, targetId);
 
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("evidenceKey", sha256(String.join("|", "TASK_REQUIREMENT",
-                String.valueOf(relationId), runId, capability)));
+                String.valueOf(relationId), runId, requirement)));
         evidence.put("relationId", relationId);
-        evidence.put("entityId", capabilityId);
+        evidence.put("entityId", targetId);
         evidence.put("sourceType", "MANUAL");
         evidence.put("sourceRef", "agent-run:" + runId);
         evidence.put("materialId", null);
         evidence.put("pageNo", null);
         evidence.put("charStart", null);
         evidence.put("charEnd", null);
-        evidence.put("quoteHash", sha256(objective + "|" + capability));
-        evidence.put("excerpt", "专家匹配需求要求能力：" + capability);
+        evidence.put("quoteHash", sha256(objective + "|" + requirement));
+        evidence.put("excerpt", "专家匹配需求：" + requirement);
         evidence.put("confidence", 1.0);
         evidence.put("extractorVersion", "task-projection-v1");
         graphMapper.upsertEvidence(evidence);
@@ -167,7 +154,7 @@ public class KnowledgeGraphTaskService
     }
 
     private static List<String> resolveCapabilities(String requiredCapabilities,
-            String industry, List<String> suggestedTerms)
+            List<String> suggestedTerms)
     {
         Set<String> values = new LinkedHashSet<>();
         if (requiredCapabilities != null)
@@ -181,7 +168,6 @@ public class KnowledgeGraphTaskService
         {
             suggestedTerms.forEach(value -> add(values, value));
         }
-        add(values, industry);
         return new ArrayList<>(values).subList(0, Math.min(12, values.size()));
     }
 

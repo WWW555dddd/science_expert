@@ -47,9 +47,6 @@ class KnowledgeGraphTaskServiceTest
                 .thenReturn(70L);
         when(graphMapper.selectRelationId(anyLong(), anyString(), anyLong()))
                 .thenReturn(80L);
-        when(graphMapper.selectCapabilityMappings()).thenReturn(List.of(Map.of(
-                "capabilityName", "技术鉴定与损失核定")));
-
         Map<String, Object> result = taskService.createTask(
                 "run-1",
                 "寻找南昌新能源储能事故技术鉴定专家",
@@ -62,9 +59,9 @@ class KnowledgeGraphTaskServiceTest
 
         assertEquals(70L, result.get("taskEntityId"));
         assertEquals(2, result.get("requiredCapabilityCount"));
-        verify(graphMapper, times(3)).upsertEntity(anyMap());
-        verify(graphMapper, times(2)).upsertRelation(anyMap());
-        verify(graphMapper, times(2)).upsertEvidence(anyMap());
+        verify(graphMapper, times(4)).upsertEntity(anyMap());
+        verify(graphMapper, times(3)).upsertRelation(anyMap());
+        verify(graphMapper, times(3)).upsertEvidence(anyMap());
         verify(outboxService).enqueue(
                 org.mockito.ArgumentMatchers.eq("TASK_CREATED"),
                 org.mockito.ArgumentMatchers.eq("TASK"),

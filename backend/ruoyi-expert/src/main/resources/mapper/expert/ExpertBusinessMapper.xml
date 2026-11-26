@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertBusinessMapper">
+
+    <select id="selectBusinessExpertList" resultType="map">
+        select p.profile_id profileId, p.user_id userId, p.real_name realName,
+               p.organization, p.professional_title professionalTitle,
+               p.research_field researchField, p.industry_field industryField,
+               p.service_region serviceRegion, p.review_status reviewStatus,
+               p.service_status serviceStatus, coalesce(p.credit_score, 100) creditScore,
+               p.graph_version graphVersion,
+               p.approved_time approvedTime, p.version profileVersion,
+               coalesce(s.schedule_count, 0) scheduleCount,
+               r.release_id latestReleaseId, r.version_no latestReleaseNo,
+               r.graph_version latestGraphVersion, r.create_time latestReleaseTime
+        from expert_profile p
+        left join (
+            select user_id, count(*) schedule_count
+            from expert_schedule
+            where weekly_capacity > 0
+            group by user_id
+        ) s on s.user_id = p.user_id
+        left join expert_release_version r on r.release_id = (
+            select max(r2.release_id)
+            from expert_release_version r2
+            where r2.user_id = p.user_id
+        )
+        where p.review_status = 'APPROVED'
+          and p.del_flag = '0'
+          and p.service_status &lt;&gt; 'EXITED'
+        <if test="keyword != null and keyword != ''">
+            and (
+                p.real_name like concat('%', #{keyword}, '%')
+                or p.organization like concat('%', #{keyword}, '%')
+                or p.research_field like concat('%', #{keyword}, '%')
+                or p.industry_field like concat('%', #{keyword}, '%')
+                or p.service_region like concat('%', #{keyword}, '%')
+            )
+        </if>
+        <if test="realName != null and realName != ''">
+            and p.real_name like concat('%', #{realName}, '%')
+        </if>
+        <if test="organization != null and organization != ''">
+            and p.organization like concat('%', #{organization}, '%')
+        </if>
+        <if test="serviceStatus != null and serviceStatus != ''">
+            and p.service_status = #{serviceStatus}
+        </if>
+        order by p.approved_time desc, p.user_id desc
+    </select>
+
+    <select id="selectLatestConflictDisclosure" resultType="map">
+        select material_id materialId, file_name fileName, file_type fileType,
+               version_no versionNo, review_status reviewStatus,
+               review_comment reviewComment, valid_from validFrom,
+               valid_until validUntil, update_time updateTime
+        from expert_material
+        where user_id = #{userId}
+          and material_category = 'OTHER'
+          and review_status = 'APPROVED'
+        order by version_no desc, material_id desc
+        limit 1
+    </select>
+
+    <select id="selectOccupancySnapshots" resultType="map">
+        select context_id contextId, expert_user_id expertUserId,
+               external_task_id externalTaskId, task_type taskType,
+               service_start serviceStart, service_end serviceEnd,
+               service_mode serviceMode, service_region serviceRegion,
+               industry, occupancy_status occupancyStatus,
+               conflict_status conflictStatus, source_system sourceSystem,
+               source_kind sourceKind, source_version sourceVersion,
+               verified_at verifiedAt
+        from expert_business_context_snapshot
+        where expert_user_id = #{userId}
+          and external_task_id is not null
+          and trim(external_task_id) != ''
+          and service_start &lt; #{serviceEnd}
+          and service_end &gt; #{serviceStart}
+        order by service_start, context_id
+    </select>
+</mapper>

@@ -20,6 +20,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="careerSummary" column="career_summary"/>
         <result property="reviewStatus" column="review_status"/>
         <result property="serviceStatus" column="service_status"/>
+        <result property="creditScore" column="credit_score"/>
         <result property="profileCompletion" column="profile_completion"/>
         <result property="graphVersion" column="graph_version"/>
         <result property="version" column="version"/>
@@ -49,7 +50,25 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="issueCount" column="issue_count"/>
         <result property="agentMessage" column="agent_message"/>
         <result property="reviewComment" column="review_comment"/>
+        <result property="effectiveFlag" column="effective_flag"/>
+        <result property="fileCount" column="file_count"/>
+        <result property="validFrom" column="valid_from"/>
+        <result property="validUntil" column="valid_until"/>
         <result property="latestSubmitTime" column="create_time"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ExpertMaterialFileResult" type="ExpertMaterialFile">
+        <id property="fileId" column="file_id"/>
+        <result property="materialId" column="material_id"/>
+        <result property="fileName" column="file_name"/>
+        <result property="filePath" column="file_path"/>
+        <result property="fileType" column="file_type"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="sortNo" column="sort_no"/>
         <result property="createBy" column="create_by"/>
         <result property="createTime" column="create_time"/>
         <result property="updateBy" column="update_by"/>
@@ -61,6 +80,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="groupCode" column="group_code"/>
         <result property="groupName" column="group_name"/>
         <result property="dimensionName" column="dimension_name"/>
+        <result property="description" column="description"/>
         <result property="weight" column="weight"/>
         <result property="score" column="score"/>
         <result property="confidence" column="confidence"/>
@@ -93,6 +113,42 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="createTime" column="create_time"/>
         <result property="updateBy" column="update_by"/>
         <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ExpertUnavailablePeriodResult" type="ExpertUnavailablePeriod">
+        <id property="unavailableId" column="unavailable_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="realName" column="real_name"/>
+        <result property="startTime" column="start_time"/>
+        <result property="endTime" column="end_time"/>
+        <result property="reason" column="reason"/>
+        <result property="version" column="version"/>
+        <result property="createBy" column="create_by"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateBy" column="update_by"/>
+        <result property="updateTime" column="update_time"/>
+    </resultMap>
+
+    <resultMap id="ExpertStatusRequestResult" type="ExpertStatusRequest">
+        <id property="requestId" column="request_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="userName" column="user_name"/>
+        <result property="realName" column="real_name"/>
+        <result property="sourceStatus" column="source_status"/>
+        <result property="targetStatus" column="target_status"/>
+        <result property="requestStatus" column="request_status"/>
+        <result property="reason" column="reason"/>
+        <result property="creditRelated" column="credit_related"/>
+        <result property="requesterId" column="requester_id"/>
+        <result property="requesterName" column="requester_name"/>
+        <result property="reviewerId" column="reviewer_id"/>
+        <result property="reviewerName" column="reviewer_name"/>
+        <result property="reviewComment" column="review_comment"/>
+        <result property="version" column="request_version"/>
+        <result property="createTime" column="create_time"/>
+        <result property="updateTime" column="update_time"/>
+        <result property="resolvedTime" column="resolved_time"/>
     </resultMap>
 
     <select id="selectProfileByUserId" parameterType="Long" resultMap="ExpertProfileResult">
@@ -215,6 +271,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
                coalesce(p.profile_completion, 0) profileCompletion,
                coalesce(p.review_status, 'NOT_REGISTERED') reviewStatus,
                coalesce(p.service_status, 'PENDING_CERTIFICATION') serviceStatus,
+               coalesce(p.credit_score, 100) creditScore,
                coalesce(p.graph_version, 0) graphVersion,
                coalesce(p.version, 0) version,
                (
@@ -330,6 +387,10 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         delete from expert_status_log where user_id = #{userId}
     </delete>
 
+    <delete id="deleteStatusRequestsByUserId" parameterType="Long">
+        delete from expert_status_request where user_id = #{userId}
+    </delete>
+
     <delete id="deleteGraphScoresByUserId" parameterType="Long">
         delete from expert_graph_score where user_id = #{userId}
     </delete>
@@ -371,9 +432,47 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </update>
 
     <update id="updateProfileServiceStatus">
-        update expert_profile set service_status = #{status}, update_time = sysdate()
+        update expert_profile
+        set service_status = #{status}, version = version + 1, update_time = sysdate()
         where user_id = #{userId}
     </update>
+
+    <update id="updateProfileServiceStatusIfCurrent">
+        update expert_profile
+        set service_status = #{status}, version = version + 1, update_time = sysdate()
+        where user_id = #{userId}
+          and service_status = #{sourceStatus}
+          and del_flag = '0'
+    </update>
+
+    <update id="updateCreditScore">
+        update expert_profile
+        set credit_score = #{creditScore},
+            update_time = sysdate()
+        where user_id = #{userId}
+          and del_flag = '0'
+    </update>
+
+    <insert id="insertCreditLog">
+        insert into expert_credit_log
+        (user_id, change_type, risk_id, request_id, before_score, after_score,
+         delta, reason, operator_id, operator_name, create_time)
+        values
+        (#{userId}, #{changeType}, #{riskId,jdbcType=BIGINT}, #{requestId,jdbcType=BIGINT},
+         #{beforeScore}, #{afterScore}, #{delta}, #{reason}, #{operatorId},
+         #{operatorName}, sysdate())
+    </insert>
+
+    <select id="selectCreditLogsByUserId" resultType="map">
+        select credit_log_id creditLogId, user_id userId, change_type changeType,
+               risk_id riskId, request_id requestId, before_score beforeScore,
+               after_score afterScore, delta, reason, operator_id operatorId,
+               operator_name operatorName, create_time createTime
+        from expert_credit_log
+        where user_id = #{userId}
+        order by create_time desc, credit_log_id desc
+        limit 50
+    </select>
 
     <select id="selectScheduleByUserId" parameterType="Long" resultMap="ExpertScheduleResult">
         select schedule_id, user_id, weekday, start_time, end_time, service_mode,
@@ -396,10 +495,72 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
          #{effectiveFrom}, #{createBy}, sysdate(), #{updateBy}, sysdate())
     </insert>
 
+    <select id="selectUnavailablePeriodsByUserId" parameterType="Long"
+            resultMap="ExpertUnavailablePeriodResult">
+        select unavailable_id, user_id, start_time, end_time, reason, version,
+               create_by, create_time, update_by, update_time
+        from expert_unavailable_period
+        where user_id = #{userId}
+        order by start_time desc, unavailable_id desc
+    </select>
+
+    <select id="selectUnavailablePeriodById" parameterType="Long"
+            resultMap="ExpertUnavailablePeriodResult">
+        select unavailable_id, user_id, start_time, end_time, reason, version,
+               create_by, create_time, update_by, update_time
+        from expert_unavailable_period
+        where unavailable_id = #{unavailableId}
+    </select>
+
+    <insert id="insertUnavailablePeriod" parameterType="ExpertUnavailablePeriod"
+            useGeneratedKeys="true" keyProperty="unavailableId">
+        insert into expert_unavailable_period
+        (user_id, start_time, end_time, reason, version,
+         create_by, create_time, update_by, update_time)
+        values
+        (#{userId}, #{startTime}, #{endTime}, #{reason}, 0,
+         #{createBy}, sysdate(), #{updateBy}, sysdate())
+    </insert>
+
+    <update id="updateUnavailablePeriod" parameterType="ExpertUnavailablePeriod">
+        update expert_unavailable_period
+        set start_time = #{startTime},
+            end_time = #{endTime},
+            reason = #{reason},
+            version = version + 1,
+            update_by = #{updateBy},
+            update_time = sysdate()
+        where unavailable_id = #{unavailableId}
+          and user_id = #{userId}
+          and version = #{version}
+    </update>
+
+    <delete id="deleteUnavailablePeriod">
+        delete from expert_unavailable_period
+        where unavailable_id = #{unavailableId}
+          and user_id = #{userId}
+    </delete>
+
+    <delete id="deleteUnavailablePeriodsByUserId" parameterType="Long">
+        delete from expert_unavailable_period where user_id = #{userId}
+    </delete>
+
     <sql id="materialColumns">
         m.material_id, m.user_id, m.file_name, m.file_path, m.file_type, m.file_size,
         m.material_category, m.version_no, m.job_status, m.review_status,
         m.extracted_fields, m.issue_count, m.agent_message, m.review_comment,
+        m.valid_from, m.valid_until,
+        greatest((
+            select count(1)
+            from expert_material_file mf
+            where mf.material_id = m.material_id
+        ), case when m.file_path is null or m.file_path = '' then 0 else 1 end) file_count,
+        case when m.review_status = 'APPROVED' and m.material_id = (
+            select max(em.material_id)
+            from expert_material em
+            where em.user_id = m.user_id
+              and em.material_category = m.material_category
+        ) then '1' else '0' end effective_flag,
         m.create_by, m.create_time, m.update_by, m.update_time
     </sql>
 
@@ -422,6 +583,37 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where m.material_id = #{materialId}
     </select>
 
+    <select id="selectMaterialByIdForUpdate" parameterType="Long"
+            resultMap="ExpertMaterialResult">
+        select <include refid="materialColumns"/>
+        from expert_material m
+        where m.material_id = #{materialId}
+        for update
+    </select>
+
+    <select id="selectMaterialFiles" parameterType="Long"
+            resultMap="ExpertMaterialFileResult">
+        select file_id, material_id, file_name, file_path, file_type, file_size, sort_no,
+               create_by, create_time, update_by, update_time
+        from expert_material_file
+        where material_id = #{materialId}
+        order by sort_no, file_id
+    </select>
+
+    <select id="selectMaterialFile" resultMap="ExpertMaterialFileResult">
+        select file_id, material_id, file_name, file_path, file_type, file_size, sort_no,
+               create_by, create_time, update_by, update_time
+        from expert_material_file
+        where material_id = #{materialId}
+          and file_id = #{fileId}
+    </select>
+
+    <select id="countMaterialFiles" parameterType="Long" resultType="int">
+        select count(1)
+        from expert_material_file
+        where material_id = #{materialId}
+    </select>
+
     <select id="selectLatestMaterialByUserId" parameterType="Long" resultMap="ExpertMaterialResult">
         select <include refid="materialColumns"/>
         from expert_material m
@@ -439,13 +631,76 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         limit 1
     </select>
 
+    <select id="selectLatestMaterialByUserIdAndCategoryForUpdate"
+            resultMap="ExpertMaterialResult">
+        select <include refid="materialColumns"/>
+        from expert_material m
+        where m.user_id = #{userId}
+          and m.material_category = #{categoryCode}
+        order by m.material_id desc
+        limit 1
+        for update
+    </select>
+
     <select id="selectCertificationStatus" parameterType="Long" resultType="map">
         select a.category_code categoryCode, a.angle_name angleName,
                a.required_flag requiredFlag, a.sort_no sortNo, a.description,
                m.material_id materialId, m.version_no versionNo,
                m.file_name fileName, m.file_type fileType, m.job_status jobStatus,
                m.review_status reviewStatus, m.review_comment reviewComment,
+               m.valid_from validFrom, m.valid_until validUntil,
+               a.validity_required validityRequired,
                m.create_time submitTime,
+               (
+                   select count(1)
+                   from expert_material_file mf
+                   where mf.material_id = m.material_id
+               ) fileCount,
+               (
+                   select em.material_id
+                   from expert_material em
+                   where em.user_id = #{userId}
+                     and em.material_category = a.category_code
+                     and em.review_status = 'APPROVED'
+                     and em.material_id = (
+                         select max(current_material.material_id)
+                         from expert_material current_material
+                         where current_material.user_id = #{userId}
+                           and current_material.material_category = a.category_code
+                     )
+                   order by em.material_id desc
+                   limit 1
+               ) effectiveMaterialId,
+               (
+                   select em.version_no
+                   from expert_material em
+                   where em.user_id = #{userId}
+                     and em.material_category = a.category_code
+                     and em.review_status = 'APPROVED'
+                     and em.material_id = (
+                         select max(current_material.material_id)
+                         from expert_material current_material
+                         where current_material.user_id = #{userId}
+                           and current_material.material_category = a.category_code
+                     )
+                   order by em.material_id desc
+                   limit 1
+               ) effectiveVersionNo,
+               (
+                   select em.file_name
+                   from expert_material em
+                   where em.user_id = #{userId}
+                     and em.material_category = a.category_code
+                     and em.review_status = 'APPROVED'
+                     and em.material_id = (
+                         select max(current_material.material_id)
+                         from expert_material current_material
+                         where current_material.user_id = #{userId}
+                           and current_material.material_category = a.category_code
+                     )
+                   order by em.material_id desc
+                   limit 1
+               ) effectiveFileName,
                (
                    select rm.review_comment
                    from expert_material rm
@@ -499,14 +754,22 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         from expert_certification_angle a
         where a.required_flag = '1'
           and a.enabled = '0'
-          and (
-              select m.review_status
+          and exists (
+              select 1
               from expert_material m
               where m.user_id = #{userId}
                 and m.material_category = a.category_code
-              order by m.material_id desc
-              limit 1
-          ) = 'APPROVED'
+                and m.material_id = (
+                    select max(current_material.material_id)
+                    from expert_material current_material
+                    where current_material.user_id = #{userId}
+                      and current_material.material_category = a.category_code
+                )
+                and m.review_status = 'APPROVED'
+                and (a.validity_required = '0'
+                     or m.valid_until is null
+                     or m.valid_until &gt;= curdate())
+          )
     </select>
 
     <select id="countAgentReadyRequiredAngles" parameterType="Long" resultType="int">
@@ -514,15 +777,23 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         from expert_certification_angle a
         where a.required_flag = '1'
           and a.enabled = '0'
-          and (
-              select m.job_status
+          and exists (
+              select 1
               from expert_material m
               where m.user_id = #{userId}
                 and m.material_category = a.category_code
+                and m.material_id = (
+                    select max(current_material.material_id)
+                    from expert_material current_material
+                    where current_material.user_id = #{userId}
+                      and current_material.material_category = a.category_code
+                )
                 and m.review_status = 'APPROVED'
-              order by m.material_id desc
-              limit 1
-          ) = 'REVIEWED'
+                and m.job_status = 'REVIEWED'
+                and (a.validity_required = '0'
+                     or m.valid_until is null
+                     or m.valid_until &gt;= curdate())
+          )
     </select>
 
     <select id="selectMaxMaterialVersion" resultType="int">
@@ -531,23 +802,101 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         where user_id = #{userId} and material_category = #{categoryCode}
     </select>
 
+    <select id="selectEffectiveMaterialVersions" parameterType="Long" resultType="map">
+        select m.material_id materialId, m.user_id userId,
+               m.material_category categoryCode, m.version_no versionNo,
+               m.file_name fileName, m.review_status reviewStatus,
+               m.update_time approvedTime,
+               (
+                   select group_concat(concat(f.file_id, ':', f.file_name)
+                          order by f.sort_no, f.file_id separator '|')
+                   from expert_material_file f
+                   where f.material_id = m.material_id
+               ) fileSignature
+        from expert_material m
+        where m.user_id = #{userId}
+          and m.material_id = (
+              select max(m2.material_id)
+              from expert_material m2
+              where m2.user_id = m.user_id
+                and m2.material_category = m.material_category
+          )
+          and m.review_status = 'APPROVED'
+        order by m.material_category
+    </select>
+
     <insert id="insertMaterial" parameterType="ExpertMaterial" useGeneratedKeys="true" keyProperty="materialId">
         insert into expert_material
         (user_id, file_name, file_path, file_type, file_size, material_category, version_no,
-         job_status, review_status, create_by, create_time, update_by, update_time)
+         job_status, review_status, valid_from, valid_until,
+         create_by, create_time, update_by, update_time)
         values
         (#{userId}, #{fileName}, #{filePath}, #{fileType}, #{fileSize}, #{materialCategory}, #{versionNo},
-         'QUEUED', 'PENDING', #{createBy}, sysdate(), #{updateBy}, sysdate())
+         'QUEUED', 'PENDING', #{validFrom,jdbcType=DATE}, #{validUntil,jdbcType=DATE},
+         #{createBy}, sysdate(), #{updateBy}, sysdate())
     </insert>
+
+    <insert id="insertMaterialFile" parameterType="ExpertMaterialFile"
+            useGeneratedKeys="true" keyProperty="fileId">
+        insert into expert_material_file
+        (material_id, file_name, file_path, file_type, file_size, sort_no,
+         create_by, create_time, update_by, update_time)
+        values
+        (#{materialId}, #{fileName}, #{filePath}, #{fileType}, #{fileSize},
+         coalesce(#{sortNo}, 0), #{createBy}, sysdate(), #{updateBy}, sysdate())
+    </insert>
+
+    <delete id="deleteMaterialFile">
+        delete from expert_material_file
+        where material_id = #{materialId}
+          and file_id = #{fileId}
+    </delete>
+
+    <update id="syncMaterialPrimaryFile">
+        update expert_material
+        set file_name = #{file.fileName},
+            file_path = #{file.filePath},
+            file_type = #{file.fileType},
+            file_size = #{file.fileSize},
+            update_by = #{updateBy},
+            update_time = sysdate()
+        where material_id = #{materialId}
+    </update>
+
+    <update id="prepareMaterialForReview">
+        update expert_material
+        set job_status = 'QUEUED',
+            review_status = 'PENDING',
+            processing_token = null,
+            processing_started_at = null,
+            extracted_fields = 0,
+            issue_count = 0,
+            agent_message = '版本文件已保存，等待重新处理',
+            review_comment = null,
+            update_by = #{updateBy},
+            update_time = sysdate()
+        where material_id = #{materialId}
+    </update>
+
+    <update id="updateMaterialValidity">
+        update expert_material
+        set valid_from = #{validFrom,jdbcType=DATE},
+            valid_until = #{validUntil,jdbcType=DATE},
+            update_by = #{updateBy},
+            update_time = sysdate()
+        where material_id = #{materialId}
+    </update>
 
     <insert id="insertAdminApprovedMaterial" parameterType="ExpertMaterial"
             useGeneratedKeys="true" keyProperty="materialId">
         insert into expert_material
         (user_id, file_name, file_path, file_type, file_size, material_category, version_no,
-         job_status, review_status, create_by, create_time, update_by, update_time)
+         job_status, review_status, valid_from, valid_until,
+         create_by, create_time, update_by, update_time)
         values
         (#{userId}, #{fileName}, #{filePath}, #{fileType}, #{fileSize}, #{materialCategory},
-         #{versionNo}, 'QUEUED', 'APPROVED', #{createBy}, sysdate(), #{updateBy}, sysdate())
+         #{versionNo}, 'QUEUED', 'APPROVED', #{validFrom,jdbcType=DATE}, #{validUntil,jdbcType=DATE},
+         #{createBy}, sysdate(), #{updateBy}, sysdate())
     </insert>
 
     <update id="claimMaterialJob">
@@ -623,16 +972,152 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 
     <select id="selectFieldMappings" parameterType="Long" resultType="map">
         select mapping_id mappingId, material_id materialId, db_field dbField, file_field fileField,
-               extracted_value extractedValue, confidence, evidence, conflict_flag conflictFlag,
+               coalesce(reviewed_value, extracted_value) extractedValue,
+               extracted_value originalExtractedValue, reviewed_value reviewedValue,
+               coalesce(reviewed_confidence, confidence) confidence,
+               confidence originalConfidence, reviewed_confidence reviewedConfidence,
+               coalesce(reviewed_evidence, evidence) evidence,
+               evidence originalEvidence, reviewed_evidence reviewedEvidence,
+               conflict_flag conflictFlag,
+               review_status reviewStatus, review_comment reviewComment,
+               reviewer_name reviewerName, review_time reviewTime,
                create_time createTime
         from expert_field_mapping
         where material_id = #{materialId}
         order by mapping_id
     </select>
 
+    <update id="updateFieldMappingReview">
+        update expert_field_mapping
+        set review_status = #{reviewStatus},
+            review_comment = coalesce(nullif(#{comment}, ''), review_comment),
+            reviewer_name = #{reviewerName},
+            review_time = sysdate()
+        where mapping_id = #{mappingId}
+          and material_id = #{materialId}
+    </update>
+
+    <update id="updateFieldMappingOpinion">
+        update expert_field_mapping
+        set reviewed_value = #{reviewedValue},
+            reviewed_confidence = #{reviewedConfidence},
+            reviewed_evidence = #{reviewedEvidence},
+            review_comment = #{reviewComment},
+            reviewer_name = #{reviewerName},
+            review_time = sysdate()
+        where mapping_id = #{mappingId}
+          and material_id = #{materialId}
+          and review_status = 'PENDING'
+    </update>
+
     <delete id="deleteDraftGraph" parameterType="Long">
         delete from expert_graph_score where user_id = #{userId} and graph_status = 'DRAFT'
     </delete>
+
+    <delete id="deleteDimensionAssessmentsByMaterial" parameterType="Long">
+        delete from expert_dimension_assessment
+        where material_id = #{materialId}
+    </delete>
+
+    <insert id="upsertDimensionAssessment" parameterType="map">
+        insert into expert_dimension_assessment
+        (user_id, material_id, dimension_code, score, confidence, evidence,
+         review_status, rule_version, create_time, update_time)
+        values
+        (#{userId}, #{materialId}, #{dimensionCode}, #{score}, #{confidence}, #{evidence},
+         #{reviewStatus}, #{ruleVersion}, sysdate(), sysdate())
+        on duplicate key update
+            user_id = values(user_id),
+            score = values(score),
+            confidence = values(confidence),
+            evidence = values(evidence),
+            review_status = values(review_status),
+            reviewed_score = null,
+            reviewed_evidence = null,
+            review_comment = null,
+            reviewer_name = null,
+            review_time = null,
+            rule_version = values(rule_version),
+            update_time = sysdate()
+    </insert>
+
+    <select id="selectDimensionAssessments" resultType="map">
+        select a.assessment_id assessmentId,
+               a.dimension_code dimensionCode,
+               a.material_id materialId,
+               coalesce(a.reviewed_score, a.score) score,
+               a.confidence,
+               coalesce(a.reviewed_evidence, a.evidence) evidence,
+               a.review_status reviewStatus,
+               a.rule_version ruleVersion,
+               m.file_name fileName,
+               m.material_category materialCategory,
+               m.version_no versionNo
+        from expert_dimension_assessment a
+        join expert_material m on m.material_id = a.material_id
+        where a.user_id = #{userId}
+          and a.review_status = 'ACCEPTED'
+          and m.review_status = 'APPROVED'
+          and m.material_id = (
+              select max(m2.material_id)
+              from expert_material m2
+              where m2.user_id = #{userId}
+                and m2.material_category = m.material_category
+                and m2.review_status = 'APPROVED'
+          )
+        order by m.material_category, a.dimension_code, a.assessment_id
+    </select>
+
+    <select id="selectMaterialDimensionAssessments" parameterType="Long" resultType="map">
+        select a.assessment_id assessmentId,
+               a.dimension_code dimensionCode,
+               d.dimension_name dimensionName,
+               coalesce(a.reviewed_score, a.score) score,
+               a.score originalScore,
+               a.reviewed_score reviewedScore,
+               a.confidence,
+               coalesce(a.reviewed_evidence, a.evidence) evidence,
+               a.evidence originalEvidence,
+               a.reviewed_evidence reviewedEvidence,
+               a.review_status reviewStatus,
+               a.rule_version ruleVersion,
+               a.review_comment reviewComment,
+               a.reviewer_name reviewerName,
+               a.review_time reviewTime
+        from expert_dimension_assessment a
+        join expert_dimension_definition d on d.dimension_code = a.dimension_code
+        where a.material_id = #{materialId}
+        order by d.sort_no, a.assessment_id
+    </select>
+
+    <update id="updateDimensionAssessmentReview">
+        update expert_dimension_assessment
+        set review_status = #{reviewStatus},
+            update_time = sysdate()
+        where material_id = #{materialId}
+          and not (review_status = 'REJECTED' and #{reviewStatus} = 'ACCEPTED')
+    </update>
+
+    <update id="updateDimensionAssessmentReviewById">
+        update expert_dimension_assessment
+        set review_status = #{reviewStatus},
+            update_time = sysdate()
+        where assessment_id = #{assessmentId}
+          and material_id = #{materialId}
+    </update>
+
+    <update id="updateDimensionAssessmentOpinion">
+        update expert_dimension_assessment
+        set reviewed_score = #{reviewedScore},
+            reviewed_evidence = #{reviewedEvidence},
+            review_comment = #{reviewComment},
+            reviewer_name = #{reviewerName},
+            review_time = sysdate(),
+            update_time = sysdate()
+        where assessment_id = #{assessmentId}
+          and material_id = #{materialId}
+          and review_status = 'PENDING'
+    </update>
 
     <delete id="deleteDraftDimensionEvidence" parameterType="Long">
         delete from expert_graph_dimension_evidence
@@ -644,7 +1129,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         from expert_graph_score
         where user_id = #{userId}
           and graph_status = 'DRAFT'
-          and profile_kind = 'GRAPH_PROFILE'
+          and profile_kind = 'EVIDENCE_SCORE'
           and conflict_flag = '0'
     </select>
 
@@ -656,6 +1141,11 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
 
     <delete id="deleteApprovedGraph" parameterType="Long">
         delete from expert_graph_score
+        where user_id = #{userId} and graph_status = 'APPROVED'
+    </delete>
+
+    <delete id="deleteApprovedDimensionEvidence" parameterType="Long">
+        delete from expert_graph_dimension_evidence
         where user_id = #{userId} and graph_status = 'APPROVED'
     </delete>
 
@@ -712,15 +1202,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         join expert_material m on m.material_id = e.material_id
         where e.user_id = #{userId}
           and e.graph_status = #{graphStatus}
+          and m.review_status = 'APPROVED'
           and m.material_id = (
               select max(m2.material_id)
               from expert_material m2
               where m2.user_id = e.user_id
                 and m2.material_category = m.material_category
+                and m2.review_status = 'APPROVED'
           )
-          <if test="graphStatus == 'APPROVED'">
-              and m.review_status = 'APPROVED'
-          </if>
         order by e.dimension_code, e.material_id
     </select>
 
@@ -746,7 +1235,8 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </update>
 
     <select id="selectGraphDimensions" resultMap="ExpertGraphResult">
-        select d.dimension_code, d.group_code, d.group_name, d.dimension_name, d.weight,
+        select d.dimension_code, d.group_code, d.group_name, d.dimension_name,
+               d.description, d.weight,
                s.score, s.confidence,
                s.evidence, coalesce(s.graph_status, 'EMPTY') graph_status,
                coalesce(s.graph_version, 0) graph_version,
@@ -809,6 +1299,197 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         order by log_id desc
     </select>
 
+    <insert id="insertStatusRequest" parameterType="ExpertStatusRequest"
+            useGeneratedKeys="true" keyProperty="requestId">
+        insert into expert_status_request
+        (user_id, source_status, target_status, request_status, reason, credit_related,
+         requester_id, requester_name, request_version, create_time, update_time)
+        values
+        (#{userId}, #{sourceStatus}, #{targetStatus}, 'PENDING', #{reason}, #{creditRelated},
+         #{requesterId}, #{requesterName}, 0, sysdate(), sysdate())
+    </insert>
+
+    <sql id="statusRequestColumns">
+        r.request_id, r.user_id, r.source_status, r.target_status, r.request_status,
+        r.reason, r.credit_related, r.requester_id, r.requester_name,
+        r.reviewer_id, r.reviewer_name, r.review_comment, r.request_version,
+        r.create_time, r.update_time, r.resolved_time
+    </sql>
+
+    <select id="selectStatusRequestById" parameterType="Long"
+            resultMap="ExpertStatusRequestResult">
+        select <include refid="statusRequestColumns"/>,
+               u.user_name, coalesce(p.real_name, u.nick_name) real_name
+        from expert_status_request r
+        left join expert_profile p on p.user_id = r.user_id
+        left join sys_user u on u.user_id = r.user_id
+        where r.request_id = #{requestId}
+    </select>
+
+    <select id="selectStatusRequestByIdForUpdate" parameterType="Long"
+            resultMap="ExpertStatusRequestResult">
+        select <include refid="statusRequestColumns"/>,
+               u.user_name, coalesce(p.real_name, u.nick_name) real_name
+        from expert_status_request r
+        left join expert_profile p on p.user_id = r.user_id
+        left join sys_user u on u.user_id = r.user_id
+        where r.request_id = #{requestId}
+        for update
+    </select>
+
+    <select id="selectPendingStatusRequestByUserId" parameterType="Long"
+            resultMap="ExpertStatusRequestResult">
+        select <include refid="statusRequestColumns"/>,
+               u.user_name, coalesce(p.real_name, u.nick_name) real_name
+        from expert_status_request r
+        left join expert_profile p on p.user_id = r.user_id
+        left join sys_user u on u.user_id = r.user_id
+        where r.user_id = #{userId}
+          and r.request_status = 'PENDING'
+        order by r.request_id desc
+        limit 1
+    </select>
+
+    <select id="selectStatusRequestsByUserId" parameterType="Long"
+            resultMap="ExpertStatusRequestResult">
+        select <include refid="statusRequestColumns"/>,
+               u.user_name, coalesce(p.real_name, u.nick_name) real_name
+        from expert_status_request r
+        left join expert_profile p on p.user_id = r.user_id
+        left join sys_user u on u.user_id = r.user_id
+        where r.user_id = #{userId}
+        order by r.request_id desc
+        limit 20
+    </select>
+
+    <select id="selectStatusRequests" parameterType="map" resultType="map">
+        select r.request_id requestId, r.user_id userId,
+               u.user_name userName, coalesce(p.real_name, u.nick_name) realName,
+               r.source_status sourceStatus, r.target_status targetStatus,
+               r.request_status requestStatus, r.reason, r.credit_related creditRelated,
+               r.requester_id requesterId, r.requester_name requesterName,
+               r.reviewer_id reviewerId, r.reviewer_name reviewerName,
+               r.review_comment reviewComment, r.request_version version,
+               r.create_time createTime, r.update_time updateTime, r.resolved_time resolvedTime,
+               p.service_status currentServiceStatus, p.review_status reviewStatus,
+               coalesce(p.credit_score, 100) creditScore
+        from expert_status_request r
+        join expert_profile p on p.user_id = r.user_id
+        left join sys_user u on u.user_id = r.user_id
+        where (
+            r.target_status = 'EXITED'
+            or (r.source_status = 'CREDIT_BLOCKED' and r.target_status = 'AVAILABLE')
+        )
+        <if test="requestStatus != null and requestStatus != ''">
+            and r.request_status = #{requestStatus}
+        </if>
+        <if test="realName != null and realName != ''">
+            and coalesce(p.real_name, u.nick_name) like concat('%', #{realName}, '%')
+        </if>
+        <if test="userName != null and userName != ''">
+            and u.user_name like concat('%', #{userName}, '%')
+        </if>
+        order by case when r.request_status = 'PENDING' then 0 else 1 end,
+                 r.request_id desc
+    </select>
+
+    <update id="resolveStatusRequest">
+        update expert_status_request
+        set request_status = #{requestStatus},
+            reviewer_id = #{reviewerId},
+            reviewer_name = #{reviewerName},
+            review_comment = #{reviewComment},
+            resolved_time = sysdate(),
+            request_version = request_version + 1,
+            update_time = sysdate()
+        where request_id = #{requestId}
+          and request_status = 'PENDING'
+          and (
+              target_status = 'EXITED'
+              or (source_status = 'CREDIT_BLOCKED' and target_status = 'AVAILABLE')
+          )
+          and request_version = #{expectedVersion}
+    </update>
+
+    <update id="cancelStatusRequest">
+        update expert_status_request
+        set request_status = 'CANCELLED',
+            review_comment = #{comment},
+            resolved_time = sysdate(),
+            request_version = request_version + 1,
+            update_time = sysdate()
+        where request_id = #{requestId}
+          and user_id = #{userId}
+          and request_status = 'PENDING'
+          and request_version = #{expectedVersion}
+    </update>
+
+    <update id="cancelPendingStatusRequests">
+        update expert_status_request
+        set request_status = 'CANCELLED',
+            reviewer_name = #{operatorName},
+            review_comment = #{comment},
+            resolved_time = sysdate(),
+            request_version = request_version + 1,
+            update_time = sysdate()
+        where user_id = #{userId}
+          and request_status = 'PENDING'
+    </update>
+
+    <select id="countPendingStatusRequests" resultType="int">
+        select count(1)
+        from expert_status_request
+        where request_status = 'PENDING'
+          and (
+              target_status = 'EXITED'
+              or (source_status = 'CREDIT_BLOCKED' and target_status = 'AVAILABLE')
+          )
+    </select>
+
+    <select id="selectExpertReleaseVersions" parameterType="Long" resultType="map">
+        select release_id releaseId, user_id userId, version_no versionNo,
+               graph_version graphVersion, approved_by approvedBy,
+               trigger_type triggerType, create_time createTime
+        from expert_release_version
+        where user_id = #{userId}
+        order by version_no desc
+    </select>
+
+    <select id="selectExpertReleaseVersion" resultType="map">
+        select release_id releaseId, user_id userId, version_no versionNo,
+               graph_version graphVersion,
+               source_material_versions_json sourceMaterialVersionsJson,
+               profile_snapshot_json profileSnapshotJson,
+               graph_snapshot_json graphSnapshotJson,
+               approved_by approvedBy, trigger_type triggerType, create_time createTime
+        from expert_release_version
+        where user_id = #{userId}
+          and release_id = #{releaseId}
+    </select>
+
+    <select id="selectLatestExpertReleaseVersion" parameterType="Long" resultType="map">
+        select release_id releaseId, user_id userId, version_no versionNo,
+               graph_version graphVersion,
+               source_material_versions_json sourceMaterialVersionsJson,
+               profile_snapshot_json profileSnapshotJson,
+               graph_snapshot_json graphSnapshotJson,
+               approved_by approvedBy, trigger_type triggerType, create_time createTime
+        from expert_release_version
+        where user_id = #{userId}
+        order by version_no desc
+        limit 1
+    </select>
+
+    <insert id="insertExpertReleaseVersion" parameterType="map"
+            useGeneratedKeys="true" keyProperty="releaseId">
+        insert into expert_release_version
+        (user_id, version_no, graph_version, source_material_versions_json,
+         profile_snapshot_json, graph_snapshot_json, approved_by, trigger_type, create_time)
+        values
+        (#{userId}, #{versionNo}, #{graphVersion}, #{sourceMaterialVersionsJson},
+         #{profileSnapshotJson}, #{graphSnapshotJson}, #{approvedBy}, #{triggerType}, sysdate())
+    </insert>
+
     <insert id="upsertApprovedExpert">
         insert into expert_approved
         (user_id, real_name, organization, research_field, industry_field, service_region,
@@ -845,8 +1526,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         left join expert_material m on m.material_id = (
             select max(m2.material_id) from expert_material m2 where m2.user_id = p.user_id
         )
-        where (p.review_status in ('PENDING_REVIEW', 'REVIEWING', 'RETURNED')
-               or (m.job_status = 'FAILED' and p.review_status != 'APPROVED'))
+        where (
+               p.review_status in ('PENDING_REVIEW', 'REVIEWING', 'RETURNED')
+               or (
+                   m.job_status in ('REVIEW_PENDING', 'PRE_REVIEW_PASSED')
+                   and m.review_status in ('PENDING', 'PENDING_REVIEW')
+               )
+               or (m.job_status = 'FAILED' and p.review_status != 'APPROVED')
+              )
           and p.del_flag = '0'
         <if test="realName != null and realName != ''">
             and p.real_name like concat('%', #{realName}, '%')
@@ -981,6 +1668,101 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             last_error = #{lastError},
             update_time = sysdate()
         where cleanup_id = #{cleanupId}
+    </update>
+
+    <select id="selectQualificationReminderCandidates" resultType="map">
+        select m.user_id userId, m.material_id materialId,
+               m.material_category materialCategory,
+               a.angle_name angleName, m.file_name fileName,
+               m.valid_until expiryDate,
+               case when m.valid_until &lt; curdate() then 'EXPIRED' else 'EXPIRING' end reminderType,
+               datediff(m.valid_until, curdate()) daysRemaining
+        from expert_material m
+        join expert_certification_angle a on a.category_code = m.material_category
+        where a.validity_required = '1'
+          and a.enabled = '0'
+          and m.review_status = 'APPROVED'
+          and m.valid_until is not null
+          and m.valid_until &lt;= date_add(curdate(), interval #{days} day)
+          and m.material_id = (
+              select max(latest_m.material_id)
+              from expert_material latest_m
+              where latest_m.user_id = m.user_id
+                and latest_m.material_category = m.material_category
+          )
+        order by m.valid_until, m.user_id
+    </select>
+
+    <insert id="insertQualificationReminder" parameterType="map">
+        insert into expert_qualification_reminder
+        (user_id, material_id, material_category, expiry_date, reminder_type,
+         reminder_status, create_time, update_time)
+        values
+        (#{userId}, #{materialId}, #{materialCategory}, #{expiryDate}, #{reminderType},
+         'ACTIVE', sysdate(), sysdate())
+        on duplicate key update
+            user_id = values(user_id),
+            material_category = values(material_category),
+            expiry_date = values(expiry_date),
+            reminder_status = 'ACTIVE',
+            update_time = sysdate()
+    </insert>
+
+    <update id="resolveStaleQualificationReminders">
+        update expert_qualification_reminder r
+        set r.reminder_status = 'RESOLVED',
+            r.update_time = sysdate()
+        where r.reminder_status = 'ACTIVE'
+          and not exists (
+              select 1
+              from expert_material m
+              join expert_certification_angle a
+                on a.category_code = m.material_category
+               and a.validity_required = '1'
+               and a.enabled = '0'
+              where m.material_id = r.material_id
+                and m.review_status = 'APPROVED'
+                and m.valid_until is not null
+                and m.valid_until &lt;= date_add(curdate(), interval #{days} day)
+                and m.material_id = (
+                    select max(latest_m.material_id)
+                    from expert_material latest_m
+                    where latest_m.user_id = m.user_id
+                      and latest_m.material_category = m.material_category
+                )
+          )
+    </update>
+
+    <select id="selectQualificationReminders" parameterType="Long" resultType="map">
+        select r.reminder_id reminderId, r.user_id userId,
+               r.material_id materialId, r.material_category materialCategory,
+               a.angle_name angleName, m.file_name fileName,
+               r.expiry_date expiryDate, r.reminder_type reminderType,
+               datediff(r.expiry_date, curdate()) daysRemaining,
+               r.create_time createTime
+        from expert_qualification_reminder r
+        join expert_material m on m.material_id = r.material_id
+        join expert_certification_angle a on a.category_code = r.material_category
+        where r.user_id = #{userId}
+          and r.reminder_status = 'ACTIVE'
+        order by r.expiry_date, r.reminder_id
+    </select>
+
+    <update id="resolveQualificationRemindersByMaterial">
+        update expert_qualification_reminder
+        set reminder_status = 'RESOLVED',
+            update_time = sysdate()
+        where material_id = #{materialId}
+          and reminder_status = 'ACTIVE'
+    </update>
+
+    <update id="resolveQualificationReminderTypeChange">
+        update expert_qualification_reminder
+        set reminder_status = 'RESOLVED',
+            update_time = sysdate()
+        where material_id = #{materialId}
+          and reminder_type != #{currentType}
+          and reminder_status = 'ACTIVE'
     </update>
 
     <insert id="insertModelCallLog" parameterType="map">

@@ -9,12 +9,10 @@ import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.ruoyi.expert.domain.ExpertGraphDimension;
 import com.ruoyi.expert.domain.ExpertProfile;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
-import com.ruoyi.expert.mapper.KnowledgeGraphMapper;
 
 /**
  * 多材料30维画像聚合。
@@ -23,23 +21,57 @@ import com.ruoyi.expert.mapper.KnowledgeGraphMapper;
 public class ExpertProfileDimensionAggregationService
 {
     private static final double CONFLICT_SCORE_GAP = 25.0;
-    private static final String PROFILE_KIND = "GRAPH_PROFILE";
-    private static final String PROFILE_RULE_VERSION = "graph-profile-v1";
+    private static final String PROFILE_KIND = "EVIDENCE_SCORE";
+    private static final String PROFILE_RULE_VERSION = "profile-assessment-v3";
 
     @Autowired
     private ExpertPlatformMapper platformMapper;
 
-    @Autowired
-    private KnowledgeGraphMapper graphMapper;
-
     /**
-     * 兼容旧调用。模型分数已经在此之前写入 CapabilityAssessment 图谱节点，
-     * 这里只从事先落库的图谱声明重建画像。
+     * 保存独立的材料级画像评估，再重建30维草稿画像。
      */
     @Transactional
     public void recordAndAggregate(ExpertProfile profile, Long materialId,
-            JSONObject analysis)
+            JSONObject analysis, boolean accepted)
     {
+        platformMapper.deleteDimensionAssessmentsByMaterial(materialId);
+        JSONObject scores = analysis == null ? null : analysis.getJSONObject("scores");
+        if (scores != null && !scores.isEmpty())
+        {
+            Map<String, ExpertGraphDimension> definitions = new LinkedHashMap<>();
+            for (ExpertGraphDimension dimension :
+                    platformMapper.selectGraphDimensions(profile.getUserId(), "DRAFT"))
+            {
+                definitions.put(dimension.getDimensionCode(), dimension);
+            }
+            for (Map.Entry<String, Object> entry : scores.entrySet())
+            {
+                String dimensionCode = entry.getKey();
+                if (!definitions.containsKey(dimensionCode)
+                        || !(entry.getValue() instanceof JSONObject score))
+                {
+                    continue;
+                }
+                Object scoreValue = score.get("score");
+                Object confidenceValue = score.get("confidence");
+                String evidence = score.getString("evidence");
+                if (!(scoreValue instanceof Number) || !(confidenceValue instanceof Number)
+                        || evidence == null || evidence.isBlank())
+                {
+                    continue;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("userId", profile.getUserId());
+                row.put("materialId", materialId);
+                row.put("dimensionCode", dimensionCode);
+                row.put("score", clamp(((Number) scoreValue).doubleValue(), 0, 100));
+                row.put("confidence", clamp(((Number) confidenceValue).doubleValue(), 0, 1));
+                row.put("evidence", abbreviate(evidence, 1000));
+                row.put("reviewStatus", accepted ? "ACCEPTED" : "PENDING");
+                row.put("ruleVersion", PROFILE_RULE_VERSION);
+                platformMapper.upsertDimensionAssessment(row);
+            }
+        }
         rebuildDraft(profile, false);
     }
 
@@ -49,7 +81,7 @@ public class ExpertProfileDimensionAggregationService
     }
 
     /**
-     * @param acceptedOnly 正式发布前只接受已审核且有效的图谱声明。
+     * @param acceptedOnly 正式发布前只接受已审核的画像材料评估。
      */
     @Transactional
     public void rebuildDraft(ExpertProfile profile, boolean acceptedOnly)
@@ -61,23 +93,25 @@ public class ExpertProfileDimensionAggregationService
                 platformMapper.selectGraphDimensions(profile.getUserId(), "DRAFT");
         Map<String, List<GraphAssessment>> grouped = new LinkedHashMap<>();
         for (Map<String, Object> row :
-                graphMapper.selectDimensionAssessments(profile.getUserId(), acceptedOnly))
+                platformMapper.selectDimensionAssessments(profile.getUserId(), acceptedOnly))
         {
-            JSONObject properties = parseProperties(row.get("propertiesJson"));
-            String dimensionCode = properties.getString("dimensionCode");
+            String dimensionCode = stringValue(row.get("dimensionCode"));
             if (dimensionCode == null || dimensionCode.isBlank())
+            {
+                continue;
+            }
+            String evidence = stringValue(row.get("evidence"));
+            if (!ExpertAgentAnalysisValidator.hasUsableEvidence(evidence))
             {
                 continue;
             }
             GraphAssessment assessment = new GraphAssessment(
                     dimensionCode,
                     longValue(row.get("materialId")),
-                    longValue(row.get("assessmentEntityId")),
-                    longValue(row.get("relationId")),
-                    longValue(row.get("evidenceId")),
-                    properties.getDoubleValue("score"),
-                    properties.getDoubleValue("confidence"),
-                    stringValue(row.get("evidence")),
+                    longValue(row.get("assessmentId")),
+                    doubleValue(row.get("score")),
+                    doubleValue(row.get("confidence")),
+                    evidence,
                     stringValue(row.get("fileName")));
             grouped.computeIfAbsent(dimensionCode, key -> new ArrayList<>()).add(assessment);
         }
@@ -96,9 +130,6 @@ public class ExpertProfileDimensionAggregationService
             double max = 0;
             List<String> evidenceTexts = new ArrayList<>();
             Set<Long> materialIds = new LinkedHashSet<>();
-            Set<Long> assessmentIds = new LinkedHashSet<>();
-            Set<Long> relationIds = new LinkedHashSet<>();
-            Set<Long> evidenceIds = new LinkedHashSet<>();
             for (GraphAssessment item : unique)
             {
                 double score = clamp(item.score(), 0, 100);
@@ -109,9 +140,6 @@ public class ExpertProfileDimensionAggregationService
                 min = Math.min(min, score);
                 max = Math.max(max, score);
                 materialIds.add(item.materialId());
-                assessmentIds.add(item.assessmentEntityId());
-                relationIds.add(item.relationId());
-                evidenceIds.add(item.evidenceId());
                 evidenceTexts.add("材料#" + item.materialId() + "：" + item.evidence());
 
                 Map<String, Object> evidenceRow = new LinkedHashMap<>();
@@ -122,10 +150,10 @@ public class ExpertProfileDimensionAggregationService
                 evidenceRow.put("score", score);
                 evidenceRow.put("confidence", itemConfidence);
                 evidenceRow.put("evidence", abbreviate(item.evidence(), 1000));
-                evidenceRow.put("inferenceMethod", "GRAPH_ASSESSMENT");
-                evidenceRow.put("graphRelationId", item.relationId());
-                evidenceRow.put("graphEntityId", item.assessmentEntityId());
-                evidenceRow.put("graphEvidenceId", item.evidenceId());
+                evidenceRow.put("inferenceMethod", "DIMENSION_ASSESSMENT");
+                evidenceRow.put("graphRelationId", null);
+                evidenceRow.put("graphEntityId", null);
+                evidenceRow.put("graphEvidenceId", null);
                 evidenceRow.put("profileRuleVersion", PROFILE_RULE_VERSION);
                 platformMapper.insertDimensionEvidence(evidenceRow);
             }
@@ -138,12 +166,12 @@ public class ExpertProfileDimensionAggregationService
                     profile.getGraphVersion() == null ? 0 : profile.getGraphVersion(),
                     PROFILE_KIND,
                     conflict ? "1" : "0",
-                    "GRAPH_ASSESSMENT_AGGREGATE",
+                    "DIMENSION_ASSESSMENT_AGGREGATE",
                     materialIds.size(),
-                    joinIds(relationIds),
-                    joinIds(assessmentIds),
-                    joinIds(evidenceIds),
-                    relationIds.size(),
+                    null,
+                    null,
+                    null,
+                    0,
                     PROFILE_RULE_VERSION);
         }
     }
@@ -153,34 +181,25 @@ public class ExpertProfileDimensionAggregationService
         Map<Long, GraphAssessment> unique = new LinkedHashMap<>();
         for (GraphAssessment item : items)
         {
-            unique.putIfAbsent(item.relationId(), item);
+            unique.putIfAbsent(item.assessmentId(), item);
         }
         return new ArrayList<>(unique.values());
     }
 
-    private static JSONObject parseProperties(Object value)
+    private static double doubleValue(Object value)
     {
-        if (value instanceof JSONObject json)
+        if (value instanceof Number number)
         {
-            return json;
-        }
-        if (value == null) {
-            return new JSONObject();
+            return number.doubleValue();
         }
         try
         {
-            return JSON.parseObject(String.valueOf(value));
+            return Double.parseDouble(String.valueOf(value));
         }
         catch (Exception ex)
         {
-            return new JSONObject();
+            return 0;
         }
-    }
-
-    private static String joinIds(Set<Long> ids)
-    {
-        return ids.stream().map(String::valueOf)
-                .collect(java.util.stream.Collectors.joining(","));
     }
 
     private static Long longValue(Object value)
@@ -219,7 +238,7 @@ public class ExpertProfileDimensionAggregationService
     }
 
     private record GraphAssessment(String dimensionCode, Long materialId,
-            Long assessmentEntityId, Long relationId, Long evidenceId,
+            Long assessmentId,
             double score, double confidence, String evidence, String fileName)
     {
     }

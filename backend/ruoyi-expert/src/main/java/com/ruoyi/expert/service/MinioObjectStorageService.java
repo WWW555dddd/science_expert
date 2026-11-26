@@ -187,8 +187,8 @@ public class MinioObjectStorageService implements ExpertObjectStorage
                 + "x-amz-content-sha256:" + payloadHash + "\n"
                 + "x-amz-date:" + amzDate + "\n";
         String signedHeaders = "host;x-amz-content-sha256;x-amz-date";
-        String canonicalRequest = method + "\n" + canonicalUri + "\n\n" + canonicalHeaders + "\n"
-                + signedHeaders + "\n" + payloadHash;
+        String canonicalRequest = canonicalRequest(method, canonicalUri, canonicalHeaders,
+                signedHeaders, payloadHash);
         String scope = dateStamp + "/" + properties.getRegion() + "/s3/aws4_request";
         String stringToSign = "AWS4-HMAC-SHA256\n" + amzDate + "\n" + scope + "\n"
                 + sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
@@ -214,6 +214,14 @@ public class MinioObjectStorageService implements ExpertObjectStorage
             builder.method(method, HttpRequest.BodyPublishers.ofByteArray(body));
         }
         return client.send(builder.build(), bodyHandler);
+    }
+
+    static String canonicalRequest(String method, String canonicalUri, String canonicalHeaders,
+            String signedHeaders, String payloadHash)
+    {
+        // CanonicalHeaders 的每个头都以换行结束，之后还需保留一个空行。
+        return method + "\n" + canonicalUri + "\n\n"
+                + canonicalHeaders + "\n" + signedHeaders + "\n" + payloadHash;
     }
 
     private byte[] signingKey(String dateStamp)

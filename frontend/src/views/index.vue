@@ -40,7 +40,7 @@ const roleTitle = computed(() => {
 })
 const roleDescription = computed(() => ({
   专家: "维护个人档案与可服务时间，提交审核材料，查看能力画像和接单状态。",
-  审核人员: "处理Agent预审结果，核验专家资料和字段映射，完成专家入库审核。",
+  审核人员: "处理Agent预审结果，核验专家资料和基本信息提取，完成专家入库审核。",
   管理人员: "管理平台用户、角色权限、专家资源、Agent任务和审计日志。",
   待配置: "登录成功，但仍需管理员分配业务角色。"
 })[roleTitle.value])
@@ -62,7 +62,7 @@ const entries = computed(() => {
   if (roles.value.includes("reviewer")) {
     result.push(
       { title: "审核工作台", description: "查看待审核规模和Agent异常任务。", path: "/review-center/workspace", icon: "DocumentChecked" },
-      { title: "专家审核队列", description: "核验资料、字段映射并作出审核决定。", path: "/review-center/queue", icon: "Checked" },
+      { title: "专家审核队列", description: "核验资料、基本信息提取并作出审核决定。", path: "/review-center/queue", icon: "Checked" },
       { title: "正式专家库", description: "查询已经审核入库的专家。", path: "/review-center/approved", icon: "Collection" }
     )
   }

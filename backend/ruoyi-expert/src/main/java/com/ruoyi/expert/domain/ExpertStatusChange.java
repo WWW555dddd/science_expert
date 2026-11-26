@@ -1,6 +1,7 @@
 package com.ruoyi.expert.domain;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 
 /**
  * 专家接单状态变更参数。
@@ -11,6 +12,7 @@ public class ExpertStatusChange
     private String serviceStatus;
 
     @NotBlank(message = "状态变更原因不能为空")
+    @Size(max = 500, message = "状态变更原因不能超过500个字符")
     private String reason;
 
     private boolean creditRelated;

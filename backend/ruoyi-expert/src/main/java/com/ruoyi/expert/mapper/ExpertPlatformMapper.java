@@ -5,9 +5,12 @@ import java.util.Map;
 import org.apache.ibatis.annotations.Param;
 import com.ruoyi.expert.domain.ExpertGraphDimension;
 import com.ruoyi.expert.domain.ExpertMaterial;
+import com.ruoyi.expert.domain.ExpertMaterialFile;
 import com.ruoyi.expert.domain.ExpertObjectCleanupTask;
 import com.ruoyi.expert.domain.ExpertProfile;
 import com.ruoyi.expert.domain.ExpertSchedule;
+import com.ruoyi.expert.domain.ExpertStatusRequest;
+import com.ruoyi.expert.domain.ExpertUnavailablePeriod;
 
 /**
  * 专家平台数据访问。
@@ -48,11 +51,22 @@ public interface ExpertPlatformMapper
 
     int deleteStatusLogsByUserId(@Param("userId") Long userId);
 
+    int deleteStatusRequestsByUserId(@Param("userId") Long userId);
+
     int deleteGraphScoresByUserId(@Param("userId") Long userId);
 
     int deleteModelCallLogsByUserId(@Param("userId") Long userId);
 
     int deleteApprovedExpert(@Param("userId") Long userId);
+
+    List<Map<String, Object>> selectExpertReleaseVersions(Long userId);
+
+    Map<String, Object> selectExpertReleaseVersion(@Param("userId") Long userId,
+            @Param("releaseId") Long releaseId);
+
+    Map<String, Object> selectLatestExpertReleaseVersion(Long userId);
+
+    int insertExpertReleaseVersion(Map<String, Object> release);
 
     int updateProfileCompletion(@Param("userId") Long userId, @Param("completion") Integer completion);
 
@@ -64,20 +78,80 @@ public interface ExpertPlatformMapper
 
     int updateProfileServiceStatus(@Param("userId") Long userId, @Param("status") String status);
 
+    int updateProfileServiceStatusIfCurrent(@Param("userId") Long userId,
+            @Param("sourceStatus") String sourceStatus, @Param("status") String status);
+
+    int updateCreditScore(@Param("userId") Long userId, @Param("creditScore") Integer creditScore);
+
+    int insertCreditLog(@Param("userId") Long userId,
+            @Param("changeType") String changeType,
+            @Param("riskId") Long riskId,
+            @Param("requestId") Long requestId,
+            @Param("beforeScore") Integer beforeScore,
+            @Param("afterScore") Integer afterScore,
+            @Param("delta") Integer delta,
+            @Param("reason") String reason,
+            @Param("operatorId") Long operatorId,
+            @Param("operatorName") String operatorName);
+
+    List<Map<String, Object>> selectCreditLogsByUserId(@Param("userId") Long userId);
+
     List<ExpertSchedule> selectScheduleByUserId(Long userId);
 
     int deleteScheduleByUserId(Long userId);
 
     int insertSchedule(ExpertSchedule schedule);
 
+    List<ExpertUnavailablePeriod> selectUnavailablePeriodsByUserId(Long userId);
+
+    ExpertUnavailablePeriod selectUnavailablePeriodById(Long unavailableId);
+
+    int insertUnavailablePeriod(ExpertUnavailablePeriod period);
+
+    int updateUnavailablePeriod(ExpertUnavailablePeriod period);
+
+    int deleteUnavailablePeriod(@Param("unavailableId") Long unavailableId,
+            @Param("userId") Long userId);
+
+    int deleteUnavailablePeriodsByUserId(Long userId);
+
     List<ExpertMaterial> selectMaterialList(ExpertMaterial query);
 
     ExpertMaterial selectMaterialById(Long materialId);
+
+    ExpertMaterial selectMaterialByIdForUpdate(Long materialId);
+
+    List<ExpertMaterialFile> selectMaterialFiles(@Param("materialId") Long materialId);
+
+    ExpertMaterialFile selectMaterialFile(@Param("materialId") Long materialId,
+            @Param("fileId") Long fileId);
+
+    int countMaterialFiles(@Param("materialId") Long materialId);
+
+    int insertMaterialFile(ExpertMaterialFile file);
+
+    int deleteMaterialFile(@Param("materialId") Long materialId,
+            @Param("fileId") Long fileId);
+
+    int syncMaterialPrimaryFile(@Param("materialId") Long materialId,
+            @Param("file") ExpertMaterialFile file, @Param("updateBy") String updateBy);
+
+    int updateMaterialValidity(@Param("materialId") Long materialId,
+            @Param("validFrom") String validFrom, @Param("validUntil") String validUntil,
+            @Param("updateBy") String updateBy);
+
+    int prepareMaterialForReview(@Param("materialId") Long materialId,
+            @Param("updateBy") String updateBy);
 
     ExpertMaterial selectLatestMaterialByUserId(Long userId);
 
     ExpertMaterial selectLatestMaterialByUserIdAndCategory(@Param("userId") Long userId,
             @Param("categoryCode") String categoryCode);
+
+    ExpertMaterial selectLatestMaterialByUserIdAndCategoryForUpdate(@Param("userId") Long userId,
+            @Param("categoryCode") String categoryCode);
+
+    List<Map<String, Object>> selectEffectiveMaterialVersions(Long userId);
 
     List<Map<String, Object>> selectCertificationStatus(Long userId);
 
@@ -117,13 +191,52 @@ public interface ExpertPlatformMapper
 
     List<Map<String, Object>> selectFieldMappings(Long materialId);
 
+    int updateFieldMappingReview(@Param("materialId") Long materialId,
+            @Param("mappingId") Long mappingId,
+            @Param("reviewStatus") String reviewStatus, @Param("comment") String comment,
+            @Param("reviewerName") String reviewerName);
+
+    int updateFieldMappingOpinion(@Param("materialId") Long materialId,
+            @Param("mappingId") Long mappingId,
+            @Param("reviewedValue") String reviewedValue,
+            @Param("reviewedConfidence") Double reviewedConfidence,
+            @Param("reviewedEvidence") String reviewedEvidence,
+            @Param("reviewComment") String reviewComment,
+            @Param("reviewerName") String reviewerName);
+
     int deleteDraftGraph(Long userId);
+
+    int deleteDimensionAssessmentsByMaterial(Long materialId);
+
+    int upsertDimensionAssessment(Map<String, Object> assessment);
+
+    List<Map<String, Object>> selectDimensionAssessments(@Param("userId") Long userId,
+            @Param("acceptedOnly") boolean acceptedOnly);
+
+    List<Map<String, Object>> selectMaterialDimensionAssessments(
+            @Param("materialId") Long materialId);
+
+    int updateDimensionAssessmentReviewById(@Param("materialId") Long materialId,
+            @Param("assessmentId") Long assessmentId,
+            @Param("reviewStatus") String reviewStatus);
+
+    int updateDimensionAssessmentReview(@Param("materialId") Long materialId,
+            @Param("reviewStatus") String reviewStatus);
+
+    int updateDimensionAssessmentOpinion(@Param("materialId") Long materialId,
+            @Param("assessmentId") Long assessmentId,
+            @Param("reviewedScore") Double reviewedScore,
+            @Param("reviewedEvidence") String reviewedEvidence,
+            @Param("reviewComment") String reviewComment,
+            @Param("reviewerName") String reviewerName);
 
     int countDraftGraph(Long userId);
 
     int countEnabledGraphDimensions();
 
     int deleteApprovedGraph(Long userId);
+
+    int deleteApprovedDimensionEvidence(Long userId);
 
     int insertGraphScore(@Param("userId") Long userId, @Param("dimensionCode") String dimensionCode,
             @Param("score") Double score, @Param("confidence") Double confidence,
@@ -171,6 +284,35 @@ public interface ExpertPlatformMapper
 
     List<Map<String, Object>> selectStatusLogs(Long userId);
 
+    int insertStatusRequest(ExpertStatusRequest request);
+
+    ExpertStatusRequest selectStatusRequestById(Long requestId);
+
+    ExpertStatusRequest selectStatusRequestByIdForUpdate(Long requestId);
+
+    ExpertStatusRequest selectPendingStatusRequestByUserId(Long userId);
+
+    List<ExpertStatusRequest> selectStatusRequestsByUserId(Long userId);
+
+    List<Map<String, Object>> selectStatusRequests(Map<String, Object> query);
+
+    int resolveStatusRequest(@Param("requestId") Long requestId,
+            @Param("expectedVersion") Integer expectedVersion,
+            @Param("requestStatus") String requestStatus,
+            @Param("reviewerId") Long reviewerId,
+            @Param("reviewerName") String reviewerName,
+            @Param("reviewComment") String reviewComment);
+
+    int cancelStatusRequest(@Param("requestId") Long requestId, @Param("userId") Long userId,
+            @Param("expectedVersion") Integer expectedVersion,
+            @Param("operatorName") String operatorName,
+            @Param("comment") String comment);
+
+    int cancelPendingStatusRequests(@Param("userId") Long userId,
+            @Param("operatorName") String operatorName, @Param("comment") String comment);
+
+    int countPendingStatusRequests();
+
     int upsertApprovedExpert(@Param("profile") ExpertProfile profile, @Param("materialId") Long materialId,
             @Param("approvedBy") String approvedBy, @Param("snapshotJson") String snapshotJson);
 
@@ -200,6 +342,19 @@ public interface ExpertPlatformMapper
 
     int markObjectCleanupRetry(@Param("cleanupId") Long cleanupId,
             @Param("lastError") String lastError);
+
+    List<Map<String, Object>> selectQualificationReminderCandidates(@Param("days") int days);
+
+    int insertQualificationReminder(Map<String, Object> reminder);
+
+    int resolveStaleQualificationReminders(@Param("days") int days);
+
+    List<Map<String, Object>> selectQualificationReminders(@Param("userId") Long userId);
+
+    int resolveQualificationRemindersByMaterial(@Param("materialId") Long materialId);
+
+    int resolveQualificationReminderTypeChange(@Param("materialId") Long materialId,
+            @Param("currentType") String currentType);
 
     int insertModelCallLog(Map<String, Object> callLog);
 }

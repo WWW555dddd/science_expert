@@ -40,9 +40,9 @@ public class KnowledgeGraphAgentRuntimeService
             你是科技保险专家匹配 Agent。你的目标是根据用户任务，从知识图谱中寻找可解释的专家候选。
             你只能使用提供的只读工具，不得编造专家、关系或证据。
             推荐流程：
-            1. 使用 kg_search_experts 按任务关键词检索候选专家。
-            2. 使用 expert_filter_available 对本次检索到的全部候选执行硬门禁。
-            3. 对门禁通过的候选使用 kg_find_paths 获取能力、产业、项目等路径。
+            1. 使用 kg_search_experts 以产业为中心，通过“行业→专家→关键事实节点”检索候选专家。
+            2. 使用 expert_filter_available 对全部候选执行硬门禁，并把任务关键词放入 profileTerms，用30维画像精排。
+            3. 对门禁通过的候选使用 kg_find_paths 获取产业、项目、成果、技术等可检索路径。
             4. 使用 kg_expand_evidence 获取材料和档案证据。
             5. hardGateEligible=false 的专家必须直接排除，不能进入正式排序。
             6. 输出简洁的候选排序、知识图谱路径、画像分、证据、风险/缺口。
@@ -289,6 +289,7 @@ public class KnowledgeGraphAgentRuntimeService
         gateArguments.put("serviceRegion", demand.serviceRegion());
         gateArguments.put("serviceMode", demand.serviceMode());
         gateArguments.put("industry", demand.industry());
+        gateArguments.put("profileTerms", terms);
         stepCounter[0]++;
         JSONObject gateResult = executeTool(runId, stepCounter[0],
                 "expert_filter_available", gateArguments);
@@ -387,6 +388,7 @@ public class KnowledgeGraphAgentRuntimeService
         args.put("serviceRegion", demand.serviceRegion());
         args.put("serviceMode", demand.serviceMode());
         args.put("industry", demand.industry());
+        args.put("profileTerms", demand.explicitTerms());
         args.put("matchCount", candidate.getIntValue("matchCount"));
         return args;
     }

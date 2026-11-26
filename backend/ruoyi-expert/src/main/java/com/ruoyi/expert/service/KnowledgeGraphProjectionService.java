@@ -7,7 +7,6 @@ import java.text.Normalizer;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -81,11 +80,9 @@ public class KnowledgeGraphProjectionService
                 profile.getProfessionalTitle(), "credential", "职称职务", profile, reviewStatus);
         relationCount += linkProfileValue(expertId, "EXPERTISE_IN", "Capability",
                 profile.getResearchField(), "researchField", "专业方向", profile, reviewStatus);
-        relationCount += linkProfileValue(expertId, "WORKS_IN_INDUSTRY", "Industry",
-                profile.getIndustryField(), "industryField", "产业领域", profile, reviewStatus);
+        relationCount += linkIndustry(expertId, profile.getIndustryField(), profile, reviewStatus);
         relationCount += linkProfileValue(expertId, "SERVES_REGION", "ServiceRegion",
                 profile.getServiceRegion(), "serviceRegion", "服务区域", profile, reviewStatus);
-        relationCount += projectCertifications(expertId, profile);
 
         Map<String, Object> eventPayload = new HashMap<>();
         eventPayload.put("userId", userId);
@@ -132,54 +129,27 @@ public class KnowledgeGraphProjectionService
         return 1;
     }
 
-    private int projectCertifications(Long expertId, ExpertProfile profile)
+    private int linkIndustry(Long expertId, String value, ExpertProfile profile,
+            String reviewStatus)
     {
-        int relationCount = 0;
-        List<Map<String, Object>> angles = platformMapper.selectCertificationStatus(profile.getUserId());
-        for (Map<String, Object> angle : angles)
+        if (value == null || value.isBlank())
         {
-            Object materialIdValue = angle.get("materialId");
-            if (materialIdValue == null)
-            {
-                continue;
-            }
-            Long materialId = ((Number) materialIdValue).longValue();
-            String categoryCode = String.valueOf(angle.get("categoryCode"));
-            String angleName = String.valueOf(angle.get("angleName"));
-            String materialStatus = String.valueOf(angle.get("reviewStatus"));
-            String entityStatus = "APPROVED".equals(materialStatus) ? "ACCEPTED" : "PENDING";
-
-            Map<String, Object> certificationProperties = new LinkedHashMap<>();
-            certificationProperties.put("categoryCode", categoryCode);
-            certificationProperties.put("angleName", angleName);
-            certificationProperties.put("required", "1".equals(String.valueOf(angle.get("requiredFlag"))));
-            certificationProperties.put("reviewStatus", materialStatus);
-            Long certificationId = upsertEntity("Certification",
-                    "certification:" + profile.getUserId() + ":" + categoryCode,
-                    angleName, certificationProperties, entityStatus);
-
-            Map<String, Object> materialProperties = new LinkedHashMap<>();
-            materialProperties.put("materialId", materialId);
-            materialProperties.put("categoryCode", categoryCode);
-            materialProperties.put("fileName", angle.get("fileName"));
-            materialProperties.put("fileType", angle.get("fileType"));
-            materialProperties.put("versionNo", angle.get("versionNo"));
-            materialProperties.put("reviewStatus", materialStatus);
-            Long materialEntityId = upsertEntity("Material", "material:" + materialId,
-                    String.valueOf(angle.get("fileName")), materialProperties, entityStatus);
-
-            graphMapper.expireCertificationMaterialRelations(certificationId);
-            String sourceRef = "material:" + materialId + ":review";
-            String excerpt = "认证角度：" + angleName + "；材料审核状态：" + materialStatus;
-            linkWithEvidence(expertId, "HAS_CERTIFICATION", certificationId, entityStatus,
-                    Map.of("categoryCode", categoryCode), "MATERIAL", sourceRef, materialId,
-                    excerpt, "certification-projection-v1");
-            linkWithEvidence(certificationId, "CERTIFIED_BY", materialEntityId, entityStatus,
-                    Map.of("categoryCode", categoryCode), "MATERIAL", sourceRef, materialId,
-                    excerpt, "certification-projection-v1");
-            relationCount += 2;
+            return 0;
         }
-        return relationCount;
+        String canonicalName = value.trim();
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("name", canonicalName);
+        properties.put("profileField", "industryField");
+        Long industryId = upsertEntity("Industry",
+                "industry:" + sha256(normalize(canonicalName)),
+                canonicalName, properties, reviewStatus);
+        graphMapper.expireIndustryExpertRelations(expertId);
+        ontologyService.requireRelationType("HAS_EXPERT", "Industry", "Expert");
+        linkWithEvidence(industryId, "HAS_EXPERT", expertId, reviewStatus,
+                Map.of("profileField", "industryField"), SOURCE_TYPE,
+                profileSource(profile, "industryField"), null,
+                "专家档案字段：产业领域", "profile-projection-v2");
+        return 1;
     }
 
     private void linkWithEvidence(Long sourceId, String relationType, Long targetId,
@@ -194,7 +164,7 @@ public class KnowledgeGraphProjectionService
         relation.put("confidence", 1.0);
         relation.put("reviewStatus", reviewStatus);
         relation.put("ontologyVersion", KnowledgeGraphOntologyService.ONTOLOGY_VERSION);
-        relation.put("sourceKind", "profile-projection-v1".equals(extractorVersion)
+        relation.put("sourceKind", extractorVersion.startsWith("profile-projection")
                 ? SOURCE_KIND : "CERTIFICATION_PROJECTION");
         relation.put("propertiesJson", JSON.toJSONString(relationProperties));
         graphMapper.upsertRelation(relation);

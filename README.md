@@ -124,6 +124,60 @@ cd backend
 mysql -uroot -p science_expert -e "source sql/verify.sql"
 ```
 
+已有数据库升级接单状态审核链路：
+
+```powershell
+cd backend
+mysql -uroot -p science_expert -e "source sql/migrations/20261116_expert_status_review.sql"
+```
+
+已有数据库升级画像维度：
+
+```powershell
+cd backend
+mysql -uroot -p science_expert -e "source sql/migrations/20261117_expert_adaptation_dimensions.sql"
+```
+
+该升级会把“重点产业覆盖”六维替换为“领域迁移与知识适配”六维。旧六维分数会归档，其他 24 维保持不变；相关专家材料需要重新处理以生成新六维分数。
+
+已有数据库升级利益冲突材料与画像：
+
+```powershell
+cd backend
+mysql -uroot -p science_expert -e "source sql/migrations/20261118_expert_conflict_dimensions.sql"
+```
+
+该升级会把“其他材料”角度调整为必选的“利益冲突说明”，并用四个利益冲突维度替换四个重复度较高的能力维度。总维度数保持 30，旧分数和逐材料证据会归档，相关材料需要重新处理。
+
+已有数据库解耦30维画像与知识图谱：
+
+```powershell
+cd backend
+mysql -uroot -p science_expert -e "source sql/migrations/20261118_expert_graph_profile_decoupling.sql"
+```
+
+该升级会把材料级30维评分迁出知识图谱，图谱只保留产业、专家和项目、成果、技术、区域、单位、能力等检索节点，并把产业到专家的关系调整为 `HAS_EXPERT`。旧图谱画像节点和关系会归档后清理。
+
+已有数据库启用同一材料版本维护多份文件：
+
+```powershell
+cd backend
+mysql -uroot -p science_expert -e "source sql/migrations/20261118_expert_material_files.sql"
+```
+
+该升级会新建 `expert_material_file`，并把每个已有材料版本的单文件自动补录为版本内文件；后续专家可在原版本中逐份增加、删除和预览文件，不会覆盖原文件。
+
+已有数据库启用服务经历材料、资质有效期和逐条 AI 结果确认：
+
+```powershell
+cd backend
+mysql --default-character-set=utf8mb4 -uroot -p science_expert -e "source sql/migrations/20261118_expert_service_credential_ai_review.sql"
+```
+
+该升级新增可选“服务经历”认证角度，为学历职称和职业资格材料增加有效期与到期提醒，并为基本信息提取增加人工逐条确认状态。
+
+升级后专家和审核人员需要重新登录，以加载新增菜单和权限。
+
 ## 启动后端
 
 ### IDEA

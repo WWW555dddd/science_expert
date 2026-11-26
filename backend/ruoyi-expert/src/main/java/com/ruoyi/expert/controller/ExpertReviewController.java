@@ -17,11 +17,11 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.expert.domain.ExpertMaterial;
+import com.ruoyi.expert.domain.ExpertAiResultEditRequest;
 import com.ruoyi.expert.domain.ExpertProfile;
 import com.ruoyi.expert.domain.ExpertReviewAction;
-import com.ruoyi.expert.domain.ExpertStatusChange;
+import com.ruoyi.expert.domain.ExpertStatusReviewAction;
 import com.ruoyi.expert.service.ExpertReviewService;
-import com.ruoyi.expert.service.ExpertWorkspaceService;
 import com.ruoyi.expert.service.ExpertMaterialPreviewService;
 import org.springframework.http.ResponseEntity;
 
@@ -34,9 +34,6 @@ public class ExpertReviewController extends BaseController
 {
     @Autowired
     private ExpertReviewService reviewService;
-
-    @Autowired
-    private ExpertWorkspaceService workspaceService;
 
     @Autowired
     private ExpertMaterialPreviewService previewService;
@@ -75,6 +72,28 @@ public class ExpertReviewController extends BaseController
         return success();
     }
 
+    @PreAuthorize("@ss.hasPermi('review:action')")
+    @PostMapping("/materials/{materialId}/ai-results/{resultType}/{resultId}")
+    public AjaxResult reviewAiResult(@PathVariable Long materialId,
+            @PathVariable String resultType, @PathVariable Long resultId,
+            @RequestParam String status)
+    {
+        reviewService.reviewAiResult(materialId, resultType, resultId, status,
+                SecurityUtils.getLoginUser());
+        return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('review:action')")
+    @PostMapping("/materials/{materialId}/ai-results/{resultType}/{resultId}/edit")
+    public AjaxResult editAiResult(@PathVariable Long materialId,
+            @PathVariable String resultType, @PathVariable Long resultId,
+            @Validated @RequestBody ExpertAiResultEditRequest request)
+    {
+        reviewService.editAiResult(materialId, resultType, resultId, request,
+                SecurityUtils.getLoginUser());
+        return success();
+    }
+
     @PreAuthorize("@ss.hasPermi('review:approved:list')")
     @GetMapping("/approved/list")
     public TableDataInfo approved(ExpertProfile query)
@@ -110,11 +129,41 @@ public class ExpertReviewController extends BaseController
     }
 
     @PreAuthorize("@ss.hasPermi('review:action')")
-    @PostMapping("/{userId}/status")
-    public AjaxResult changeStatus(@PathVariable Long userId, @Validated @RequestBody ExpertStatusChange change)
+    @GetMapping("/materials/{materialId}/files/{fileId}/preview")
+    public ResponseEntity<byte[]> previewMaterialFile(@PathVariable Long materialId,
+            @PathVariable Long fileId, @RequestParam(defaultValue = "raw") String mode)
     {
-        workspaceService.changeServiceStatus(change, userId, SecurityUtils.getUsername());
-        return success();
+        ExpertMaterialPreviewService.PreviewFile preview = previewService.previewFile(materialId,
+                fileId, null, false, "text".equalsIgnoreCase(mode));
+        return ResponseEntity.ok()
+                .header("Content-Type", preview.getContentType())
+                .header("Cache-Control", "no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(preview.getBytes());
+    }
+
+    @PreAuthorize("@ss.hasPermi('review:action')")
+    @GetMapping("/status-requests")
+    public TableDataInfo statusRequests(@RequestParam(required = false) String requestStatus,
+            @RequestParam(required = false) String realName,
+            @RequestParam(required = false) String userName)
+    {
+        startPage();
+        Map<String, Object> query = new HashMap<>();
+        query.put("requestStatus", requestStatus == null || requestStatus.isBlank()
+                ? "PENDING" : requestStatus);
+        query.put("realName", realName);
+        query.put("userName", userName);
+        return getDataTable(reviewService.statusRequests(query));
+    }
+
+    @PreAuthorize("@ss.hasPermi('review:action')")
+    @PostMapping("/status-requests/{requestId}/action")
+    public AjaxResult reviewStatusRequest(@PathVariable Long requestId,
+            @Validated @RequestBody ExpertStatusReviewAction action)
+    {
+        return success(reviewService.reviewStatusRequest(requestId, action,
+                SecurityUtils.getLoginUser()));
     }
 
     @PreAuthorize("@ss.hasPermi('review:workspace:view')")

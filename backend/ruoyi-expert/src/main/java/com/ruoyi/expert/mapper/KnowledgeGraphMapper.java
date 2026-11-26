@@ -26,7 +26,7 @@ public interface KnowledgeGraphMapper
 
     int expireProfileRelations(@Param("sourceEntityId") Long sourceEntityId);
 
-    int expireCertificationMaterialRelations(@Param("sourceEntityId") Long sourceEntityId);
+    int expireIndustryExpertRelations(@Param("expertEntityId") Long expertEntityId);
 
     Long selectRelationId(@Param("sourceEntityId") Long sourceEntityId,
             @Param("relationType") String relationType,
@@ -37,11 +37,55 @@ public interface KnowledgeGraphMapper
     int reviewMaterialFacts(@Param("materialId") Long materialId,
             @Param("reviewStatus") String reviewStatus);
 
+    List<Map<String, Object>> selectMaterialReviewFacts(@Param("materialId") Long materialId);
+
+    int updateMaterialRelationReview(@Param("materialId") Long materialId,
+            @Param("relationId") Long relationId,
+            @Param("reviewStatus") String reviewStatus);
+
+    int updateMaterialRelationOpinion(@Param("materialId") Long materialId,
+            @Param("relationId") Long relationId,
+            @Param("reviewedSourceName") String reviewedSourceName,
+            @Param("reviewedSourceType") String reviewedSourceType,
+            @Param("reviewedRelationType") String reviewedRelationType,
+            @Param("reviewedTargetName") String reviewedTargetName,
+            @Param("reviewedTargetType") String reviewedTargetType,
+            @Param("reviewedExcerpt") String reviewedExcerpt,
+            @Param("reviewComment") String reviewComment,
+            @Param("reviewerName") String reviewerName);
+
+    int applyRelationSourceReview(@Param("materialId") Long materialId,
+            @Param("relationId") Long relationId);
+
+    int applyRelationTargetReview(@Param("materialId") Long materialId,
+            @Param("relationId") Long relationId);
+
+    int applyRelationTypeReview(@Param("materialId") Long materialId,
+            @Param("relationId") Long relationId);
+
+    int applyMaterialSourceReviews(@Param("materialId") Long materialId);
+
+    int applyMaterialTargetReviews(@Param("materialId") Long materialId);
+
+    int applyMaterialRelationTypeReviews(@Param("materialId") Long materialId);
+
+    int updateRelationReviewStatus(@Param("relationId") Long relationId,
+            @Param("reviewStatus") String reviewStatus);
+
+    int reviewMaterialEvidence(@Param("materialId") Long materialId,
+            @Param("reviewStatus") String reviewStatus);
+
     int acceptMaterialEntities(@Param("materialId") Long materialId);
 
     int deleteMaterialFactsByUserId(@Param("userId") Long userId);
 
     int deleteMaterialEvidenceByUserId(@Param("userId") Long userId);
+
+    int deleteMaterialGraphEvidence(@Param("materialId") Long materialId);
+
+    int deleteMaterialGraphRelations(@Param("materialId") Long materialId);
+
+    int deleteOrphanMaterialRelations();
 
     int insertOutboxEvent(Map<String, Object> event);
 
@@ -65,6 +109,10 @@ public interface KnowledgeGraphMapper
 
     List<Map<String, Object>> selectEntitiesByIds(@Param("entityIds") List<Long> entityIds);
 
+    List<Map<String, Object>> selectOverviewEntities(@Param("limit") int limit);
+
+    List<Map<String, Object>> selectOverviewRelations(@Param("limit") int limit);
+
     List<Map<String, Object>> selectExtractedEntitiesByUserId(@Param("userId") Long userId);
 
     List<Map<String, Object>> selectRelationsForEntityIds(
@@ -76,15 +124,4 @@ public interface KnowledgeGraphMapper
     List<Map<String, Object>> selectEvidenceByEntityIds(
             @Param("entityIds") List<Long> entityIds);
 
-    List<Map<String, Object>> selectCapabilityMappings();
-
-    List<Map<String, Object>> selectDimensionAssessments(
-            @Param("userId") Long userId,
-            @Param("acceptedOnly") boolean acceptedOnly);
-
-    int deleteMaterialAssessments(@Param("materialId") Long materialId);
-
-    int deleteMaterialAssessmentRelations(@Param("materialId") Long materialId);
-
-    int deleteMaterialAssessmentEntities(@Param("materialId") Long materialId);
 }

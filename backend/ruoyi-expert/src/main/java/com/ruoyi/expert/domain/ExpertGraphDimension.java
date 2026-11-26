@@ -13,6 +13,7 @@ public class ExpertGraphDimension
     private String groupCode;
     private String groupName;
     private String dimensionName;
+    private String description;
     private BigDecimal weight;
     private BigDecimal score;
     private BigDecimal confidence;
@@ -70,6 +71,16 @@ public class ExpertGraphDimension
     public void setDimensionName(String dimensionName)
     {
         this.dimensionName = dimensionName;
+    }
+
+    public String getDescription()
+    {
+        return description;
+    }
+
+    public void setDescription(String description)
+    {
+        this.description = description;
     }
 
     public BigDecimal getWeight()

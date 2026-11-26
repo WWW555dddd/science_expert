@@ -88,7 +88,7 @@
           :disabled="!agentObjective.trim()"
           @click="runAgent"
         >
-          运行 Agent
+          {{ agentRunning ? "Agent 执行中，可能需要 1–3 分钟" : "运行 Agent" }}
         </el-button>
         <el-button
           type="warning"
@@ -129,43 +129,6 @@
       </el-table>
     </el-card>
 
-    <el-card shadow="never" header="抽取质量与画像一致性评估" class="evaluation-card">
-      <div class="evaluation-controls">
-        <el-select v-model="selectedDatasetId" placeholder="选择评估数据集" style="width: 280px">
-          <el-option
-            v-for="dataset in evaluationDatasets"
-            :key="dataset.datasetId"
-            :label="`${dataset.datasetName} · ${dataset.datasetVersion}`"
-            :value="dataset.datasetId"
-          />
-        </el-select>
-        <el-button
-          type="primary"
-          plain
-          icon="DataLine"
-          :loading="evaluationRunning"
-          :disabled="!selectedDatasetId"
-          @click="runEvaluation"
-        >
-          运行质量评估
-        </el-button>
-        <span v-if="evaluationResult?.runId">评估编号：{{ evaluationResult.runId }}</span>
-      </div>
-      <el-alert
-        v-if="selectedDataset?.description"
-        :title="selectedDataset.description"
-        type="info"
-        :closable="false"
-        show-icon
-      />
-      <div v-if="evaluationMetrics.length" class="evaluation-metrics">
-        <div v-for="metric in evaluationMetrics" :key="metric.key" class="evaluation-metric">
-          <span>{{ metric.label }}</span>
-          <strong>{{ metric.value }}</strong>
-        </div>
-      </div>
-    </el-card>
-
     <el-card shadow="never" header="资料处理任务" class="jobs-card">
       <el-table :data="jobs">
         <el-table-column label="材料编号" prop="materialId" width="100" />
@@ -199,12 +162,10 @@
 <script setup name="ExpertAdmin">
 import {
   getAdminSummary,
-  getEvaluationDatasets,
   getKnowledgeGraphAgentRun,
   listAdminJobs,
   rebuildKnowledgeGraph,
   retryAgentJob,
-  runQualityEvaluation,
   runKnowledgeGraphAgent
 } from "@/api/expert/platform"
 
@@ -227,38 +188,6 @@ const agentRunning = ref(false)
 const agentResult = ref(null)
 const agentSteps = ref([])
 const graphRebuilding = ref(false)
-const evaluationDatasets = ref([])
-const selectedDatasetId = ref(null)
-const evaluationRunning = ref(false)
-const evaluationResult = ref(null)
-
-const selectedDataset = computed(() =>
-  evaluationDatasets.value.find(item => item.datasetId === selectedDatasetId.value)
-)
-const evaluationMetrics = computed(() => {
-  const summary = evaluationResult.value?.summary || {}
-  return [
-    ["fieldF1", "字段F1", "%"],
-    ["entityF1", "实体F1", "%"],
-    ["relationF1", "关系F1", "%"],
-    ["conflictF1", "冲突F1", "%"],
-    ["portraitCompleteness", "画像完整度", "%"],
-    ["portraitEvidenceCoverage", "画像证据覆盖", "%"],
-    ["relationEvidenceCoverage", "关系证据覆盖", "%"],
-    ["evidenceLocationCoverage", "证据定位覆盖", "%"],
-    ["crossMaterialConsistency", "跨材料一致性", "%"],
-    ["crossMaterialComparableDimensions", "可比较维度", ""],
-    ["overallQuality", "综合质量", "%"]
-  ]
-    .map(([key, label, suffix]) => {
-      const value = summary[key]
-      return {
-        key,
-        label,
-        value: value == null ? "不可计算" : `${value}${suffix}`
-      }
-    })
-})
 
 function go(path) {
   router.push(path)
@@ -275,15 +204,6 @@ function loadData() {
     .finally(() => {
       loading.value = false
     })
-}
-
-function loadEvaluationDatasets() {
-  getEvaluationDatasets().then(res => {
-    evaluationDatasets.value = res.data || []
-    if (!selectedDatasetId.value && evaluationDatasets.value.length) {
-      selectedDatasetId.value = evaluationDatasets.value[0].datasetId
-    }
-  })
 }
 
 function getJobs() {
@@ -373,22 +293,6 @@ function rebuildGraph() {
   })
 }
 
-function runEvaluation() {
-  evaluationRunning.value = true
-  evaluationResult.value = null
-  runQualityEvaluation(selectedDatasetId.value)
-    .then(res => {
-      evaluationResult.value = res.data || {}
-      proxy.$modal.msgSuccess("质量评估完成")
-    })
-    .catch(error => {
-      proxy.$modal.msgError(error?.message || "质量评估失败")
-    })
-    .finally(() => {
-      evaluationRunning.value = false
-    })
-}
-
 function jobText(status) {
   return {
     QUEUED: "排队中",
@@ -418,7 +322,6 @@ function jobTagType(row) {
 }
 
 loadData()
-loadEvaluationDatasets()
 </script>
 
 <style scoped lang="scss">
@@ -513,41 +416,5 @@ loadEvaluationDatasets()
 }
 .agent-steps {
   margin-top: 12px;
-}
-.evaluation-card {
-  margin-top: 16px;
-}
-.evaluation-controls {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
-  span {
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-  }
-}
-.evaluation-metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
-  gap: 10px;
-  margin-top: 14px;
-}
-.evaluation-metric {
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--el-fill-color-light);
-  span {
-    display: block;
-    color: var(--el-text-color-secondary);
-    font-size: 12px;
-  }
-  strong {
-    display: block;
-    margin-top: 6px;
-    color: var(--el-color-primary);
-    font-size: 22px;
-  }
 }
 </style>

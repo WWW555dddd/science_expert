@@ -9,7 +9,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ConcurrentHashMap;
@@ -56,7 +55,6 @@ class KnowledgeGraphProjectionServiceTest
         profile.setServiceRegion("上海");
         profile.setReviewStatus("APPROVED");
         when(platformMapper.selectProfileByUserId(12L)).thenReturn(profile);
-        when(platformMapper.selectCertificationStatus(12L)).thenReturn(List.of());
         when(graphMapper.selectOntologyVersion(KnowledgeGraphOntologyService.ONTOLOGY_VERSION))
                 .thenReturn(Map.of("versionCode", KnowledgeGraphOntologyService.ONTOLOGY_VERSION));
 
@@ -74,6 +72,7 @@ class KnowledgeGraphProjectionServiceTest
         assertEquals("PROJECTED", result.get("status"));
         assertEquals(5, result.get("relationCount"));
         verify(graphMapper).expireProfileRelations(1L);
+        verify(graphMapper).expireIndustryExpertRelations(1L);
         verify(graphMapper, times(5)).upsertRelation(anyMap());
         verify(graphMapper, times(5)).upsertEvidence(anyMap());
         verify(outboxService).enqueue(eq("EXPERT_PROJECTED"), eq("EXPERT"), eq(12L), anyMap());

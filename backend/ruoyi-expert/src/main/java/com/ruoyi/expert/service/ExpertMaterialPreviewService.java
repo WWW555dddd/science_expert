@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import com.ruoyi.common.config.RuoYiConfig;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.expert.domain.ExpertMaterial;
+import com.ruoyi.expert.domain.ExpertMaterialFile;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
 
 /**
@@ -40,8 +42,40 @@ public class ExpertMaterialPreviewService
         {
             throw new ServiceException("无权预览该资料文件");
         }
-        byte[] bytes = loadBytes(material);
-        String type = material.getFileType() == null ? "" : material.getFileType().toLowerCase(Locale.ROOT);
+        List<ExpertMaterialFile> files = platformMapper.selectMaterialFiles(materialId);
+        if (!files.isEmpty())
+        {
+            ExpertMaterialFile file = files.get(0);
+            return preview(file.getFileName(), file.getFilePath(), file.getFileType(), textMode);
+        }
+        return preview(material.getFileName(), material.getFilePath(), material.getFileType(), textMode);
+    }
+
+    public PreviewFile previewFile(Long materialId, Long fileId, Long ownerUserId,
+            boolean checkOwner, boolean textMode)
+    {
+        ExpertMaterial material = platformMapper.selectMaterialById(materialId);
+        if (material == null)
+        {
+            throw new ServiceException("资料版本不存在");
+        }
+        if (checkOwner && !material.getUserId().equals(ownerUserId))
+        {
+            throw new ServiceException("无权预览该资料文件");
+        }
+        ExpertMaterialFile file = platformMapper.selectMaterialFile(materialId, fileId);
+        if (file == null)
+        {
+            throw new ServiceException("版本文件不存在");
+        }
+        return preview(file.getFileName(), file.getFilePath(), file.getFileType(), textMode);
+    }
+
+    private PreviewFile preview(String fileName, String filePath, String fileType,
+            boolean textMode)
+    {
+        byte[] bytes = loadBytes(filePath);
+        String type = fileType == null ? "" : fileType.toLowerCase(Locale.ROOT);
         if (textMode)
         {
             if ("docx".equals(type))
@@ -56,20 +90,20 @@ public class ExpertMaterialPreviewService
             {
                 throw new ServiceException("该文件类型不支持文本预览");
             }
-            return new PreviewFile(material.getFileName(), "text/plain;charset=UTF-8", bytes);
+            return new PreviewFile(fileName, "text/plain;charset=UTF-8", bytes);
         }
-        return new PreviewFile(material.getFileName(), contentType(type), bytes);
+        return new PreviewFile(fileName, contentType(type), bytes);
     }
 
-    private byte[] loadBytes(ExpertMaterial material)
+    private byte[] loadBytes(String filePath)
     {
         try
         {
-            if (material.getFilePath() != null && material.getFilePath().startsWith("minio://"))
+            if (filePath != null && filePath.startsWith("minio://"))
             {
-                return objectStorage.download(material.getFilePath());
+                return objectStorage.download(filePath);
             }
-            String relative = material.getFilePath();
+            String relative = filePath;
             if (relative != null && relative.startsWith("/profile"))
             {
                 relative = relative.substring("/profile".length());

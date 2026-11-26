@@ -85,6 +85,7 @@ function statusText(status) {
     AVAILABLE: "正常接单",
     PAUSED: "暂停",
     PENDING_CERTIFICATION: "待认证",
+    CREDIT_BLOCKED: "禁止接单",
     EXITED: "退出"
   }[status] || status
 }

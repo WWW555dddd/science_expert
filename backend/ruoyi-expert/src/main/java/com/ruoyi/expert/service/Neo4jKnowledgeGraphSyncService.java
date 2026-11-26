@@ -129,6 +129,14 @@ public class Neo4jKnowledgeGraphSyncService
         execute(DISABLE_EXPERT_RELATIONS, Map.of("ownerExpertId", userId));
         execute(UPSERT_NODES, Map.of("nodes", nodeRows(entities)));
         execute(UPSERT_RELATIONS, Map.of("relations", relationRows(relations, userId)));
+        execute("""
+                MATCH (n:KGNode)
+                WHERE n.entityType IN [
+                    'CapabilityAssessment', 'Certification', 'Material'
+                ]
+                  AND NOT (n)--()
+                DETACH DELETE n
+                """, Map.of());
     }
 
     public void syncTask(Long taskEntityId)

@@ -184,3 +184,9 @@ expert:
     neo4j-password: ${NEO4J_PASSWORD:}
     database: ${EXPERT_KG_NEO4J_DATABASE:neo4j}
     batch-size: ${EXPERT_KG_SYNC_BATCH_SIZE:20}
+  credit:
+    block-threshold: ${EXPERT_CREDIT_BLOCK_THRESHOLD:60}
+    restore-score: ${EXPERT_CREDIT_RESTORE_SCORE:60}
+    low-risk-deduction: ${EXPERT_CREDIT_LOW_DEDUCTION:2}
+    medium-risk-deduction: ${EXPERT_CREDIT_MEDIUM_DEDUCTION:5}
+    high-risk-deduction: ${EXPERT_CREDIT_HIGH_DEDUCTION:10}

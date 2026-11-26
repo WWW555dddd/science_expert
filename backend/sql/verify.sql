@@ -38,7 +38,7 @@ FROM expert_material
 WHERE user_id = @uid
 ORDER BY material_id DESC;
 
--- 5. 文件字段与标准字段映射
+-- 5. 材料基本信息提取结果
 SELECT fm.material_id, fm.db_field, fm.file_field, fm.extracted_value,
        fm.confidence, fm.evidence, fm.conflict_flag
 FROM expert_field_mapping fm
@@ -67,6 +67,12 @@ FROM expert_graph_dimension_evidence e
 WHERE e.user_id = @uid
 ORDER BY e.graph_status, e.dimension_code, e.material_id;
 
+SELECT a.dimension_code, a.material_id, a.score, a.confidence,
+       a.review_status, a.rule_version, a.evidence
+FROM expert_dimension_assessment a
+WHERE a.user_id = @uid
+ORDER BY a.material_id, a.dimension_code;
+
 -- 7. 最近模型调用审计
 SELECT provider, model, prompt_version, latency_ms,
        prompt_tokens, completion_tokens, total_tokens,
@@ -86,7 +92,13 @@ SELECT r.relation_type, se.canonical_name AS source_name,
 FROM kg_relation r
 JOIN kg_entity se ON se.entity_id = r.source_entity_id
 JOIN kg_entity te ON te.entity_id = r.target_entity_id
-WHERE se.external_key = CONCAT('expert:', @uid);
+WHERE se.external_key = CONCAT('expert:', @uid)
+   OR te.external_key = CONCAT('expert:', @uid);
+
+-- 期望无结果：知识图谱不再保存30维评估、认证和材料节点
+SELECT entity_id, entity_type, canonical_name
+FROM kg_entity
+WHERE entity_type IN ('CapabilityAssessment', 'Certification', 'Material');
 
 SELECT e.source_type, e.source_ref, e.excerpt, e.confidence
 FROM kg_evidence e
@@ -121,7 +133,15 @@ SELECT a.category_code, a.angle_name, a.required_flag,
            WHERE am.user_id = @uid
              AND am.material_category = a.category_code
              AND am.review_status = 'APPROVED'
-       ) AS approved_count
+       ) AS approved_count,
+       (
+           SELECT em.version_no FROM expert_material em
+           WHERE em.user_id = @uid
+             AND em.material_category = a.category_code
+             AND em.review_status = 'APPROVED'
+           ORDER BY em.material_id DESC
+           LIMIT 1
+       ) AS effective_version_no
 FROM expert_certification_angle a
 LEFT JOIN expert_material m ON m.material_id = (
     SELECT MAX(m2.material_id)
@@ -145,6 +165,13 @@ FROM expert_status_log
 WHERE user_id = @uid
 ORDER BY log_id DESC;
 
+SELECT request_id, source_status, target_status, request_status, reason,
+       credit_related, requester_name, reviewer_name, review_comment,
+       request_version, create_time, resolved_time
+FROM expert_status_request
+WHERE user_id = @uid
+ORDER BY request_id DESC;
+
 -- 10. 正式专家库
 SELECT approved_id, user_id, real_name, organization, research_field,
        industry_field, service_region, service_status,
@@ -157,6 +184,52 @@ SELECT user_id, material_category, version_no, COUNT(*) AS duplicate_count
 FROM expert_material
 GROUP BY user_id, material_category, version_no
 HAVING COUNT(*) > 1;
+
+-- 当前专家材料版本内文件，期望至少每份材料一条
+SELECT m.material_id, m.material_category, m.version_no, m.job_status,
+       COUNT(f.file_id) AS file_count,
+       GROUP_CONCAT(f.file_name ORDER BY f.sort_no, f.file_id SEPARATOR ' | ') AS file_names
+FROM expert_material m
+LEFT JOIN expert_material_file f ON f.material_id = m.material_id
+WHERE m.user_id = @uid
+GROUP BY m.material_id, m.material_category, m.version_no, m.job_status
+ORDER BY m.material_id DESC;
+
+-- 同一版本重复添加同一对象检查，期望无结果
+SELECT material_id, file_path, COUNT(*) AS duplicate_count
+FROM expert_material_file
+GROUP BY material_id, file_path
+HAVING COUNT(*) > 1;
+
+-- 服务经历角度和资质有效期配置
+SELECT category_code, angle_name, required_flag, sort_no, validity_required
+FROM expert_certification_angle
+WHERE enabled = '0'
+ORDER BY sort_no;
+
+-- 当前资质有效期及提醒
+SELECT m.material_id, m.material_category, m.valid_from, m.valid_until,
+       r.reminder_type, r.reminder_status
+FROM expert_material m
+LEFT JOIN expert_qualification_reminder r ON r.material_id = m.material_id
+WHERE m.user_id = @uid
+ORDER BY m.material_id DESC, r.reminder_id DESC;
+
+-- 尚未逐条确认的 AI 结果
+SELECT 'FIELD' result_type, COUNT(*) pending_count
+FROM expert_field_mapping m
+JOIN expert_material em ON em.material_id = m.material_id
+WHERE em.user_id = @uid AND m.review_status = 'PENDING'
+UNION ALL
+SELECT 'DIMENSION', COUNT(*)
+FROM expert_dimension_assessment a
+WHERE a.user_id = @uid AND a.review_status = 'PENDING'
+UNION ALL
+SELECT 'RELATION', COUNT(DISTINCT r.relation_id)
+FROM kg_relation r
+JOIN kg_evidence e ON e.relation_id = r.relation_id
+JOIN expert_material em ON em.material_id = e.material_id
+WHERE em.user_id = @uid AND r.review_status = 'PENDING';
 
 -- 12. 超时 Agent 任务检查
 SELECT material_id, user_id, job_status, processing_token,
@@ -172,24 +245,31 @@ FROM expert_object_cleanup
 WHERE task_status = 'PENDING'
 ORDER BY cleanup_id;
 
--- 14. 图谱驱动画像追溯，正式画像应全部引用ACCEPTED图谱声明
+-- 14. 当前30维画像（由当前已审核材料独立聚合）
 SELECT s.dimension_code, s.profile_kind, s.inference_method,
        s.graph_path_count, s.graph_relation_ids, s.graph_evidence_ids,
        s.profile_rule_version
 FROM expert_graph_score s
 WHERE s.user_id = @uid
-  AND s.graph_status = 'APPROVED'
+  AND s.graph_status = 'DRAFT'
 ORDER BY s.dimension_code;
 
-SELECT r.review_status, COUNT(*) AS relation_count
-FROM kg_relation r
-JOIN kg_evidence e ON e.relation_id = r.relation_id
-JOIN kg_entity a ON a.entity_id = r.target_entity_id
-WHERE a.entity_type = 'CapabilityAssessment'
-  AND e.material_id IN (
-      SELECT material_id FROM expert_material WHERE user_id = @uid
-  )
-GROUP BY r.review_status;
+-- 16. 临时不可用时段
+SELECT unavailable_id, start_time, end_time, reason, version, update_time
+FROM expert_unavailable_period
+WHERE user_id = @uid
+ORDER BY start_time;
+
+-- 17. 审核版本快照
+SELECT release_id, version_no, graph_version, approved_by, trigger_type,
+       JSON_LENGTH(source_material_versions_json) AS material_version_count,
+       JSON_LENGTH(JSON_EXTRACT(profile_snapshot_json, '$.dimensions')) AS dimension_count,
+       JSON_LENGTH(JSON_EXTRACT(graph_snapshot_json, '$.entities')) AS entity_count,
+       JSON_LENGTH(JSON_EXTRACT(graph_snapshot_json, '$.relations')) AS relation_count,
+       create_time
+FROM expert_release_version
+WHERE user_id = @uid
+ORDER BY version_no DESC;
 
 -- 15. 最近匹配任务的必需能力
 SELECT t.canonical_name AS task_name, c.canonical_name AS required_capability,

@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertTaskConflictMapper">
+
+    <resultMap id="TaskConflictResult" type="ExpertTaskConflictConfirmation">
+        <id property="confirmationId" column="confirmation_id"/>
+        <result property="externalTaskId" column="external_task_id"/>
+        <result property="userId" column="expert_user_id"/>
+        <result property="serviceStart" column="service_start"/>
+        <result property="serviceEnd" column="service_end"/>
+        <result property="serviceMode" column="service_mode"/>
+        <result property="serviceRegion" column="service_region"/>
+        <result property="industry" column="industry"/>
+        <result property="conflictStatus" column="conflict_status"/>
+        <result property="status" column="status"/>
+        <result property="arrangementStatus" column="arrangement_status"/>
+        <result property="arrangedBy" column="arranged_by"/>
+        <result property="arrangedAt" column="arranged_at"/>
+        <result property="arrangementSource" column="arrangement_source"/>
+        <result property="arrangementVersion" column="arrangement_version"/>
+        <result property="statement" column="statement"/>
+        <result property="requestedBy" column="requested_by"/>
+        <result property="requestTime" column="request_time"/>
+        <result property="confirmedAt" column="confirmed_at"/>
+        <result property="sourceSystem" column="source_system"/>
+        <result property="version" column="version"/>
+    </resultMap>
+
+    <sql id="confirmationColumns">
+        confirmation_id, external_task_id, expert_user_id, service_start, service_end,
+        service_mode, service_region, industry, conflict_status, status,
+        arrangement_status, arranged_by, arranged_at, arrangement_source,
+        arrangement_version, statement,
+        requested_by, request_time, confirmed_at, source_system, version
+    </sql>
+
+    <insert id="insertConfirmation" parameterType="ExpertTaskConflictConfirmation"
+            useGeneratedKeys="true" keyProperty="confirmationId">
+        insert into expert_task_conflict_confirmation
+            (external_task_id, expert_user_id, service_start, service_end,
+             service_mode, service_region, industry, conflict_status, status,
+             requested_by, request_time, source_system, version)
+        values
+            (#{externalTaskId}, #{userId}, #{serviceStart}, #{serviceEnd},
+             #{serviceMode}, #{serviceRegion}, #{industry}, 'PENDING', 'PENDING',
+             #{requestedBy}, sysdate(), #{sourceSystem}, 0)
+    </insert>
+
+    <select id="selectById" resultMap="TaskConflictResult">
+        select <include refid="confirmationColumns"/>
+        from expert_task_conflict_confirmation
+        where confirmation_id = #{confirmationId}
+    </select>
+
+    <select id="selectByIdForUpdate" resultMap="TaskConflictResult">
+        select <include refid="confirmationColumns"/>
+        from expert_task_conflict_confirmation
+        where confirmation_id = #{confirmationId}
+        for update
+    </select>
+
+    <select id="selectByTaskAndExpert" resultMap="TaskConflictResult">
+        select <include refid="confirmationColumns"/>
+        from expert_task_conflict_confirmation
+        where external_task_id = #{externalTaskId}
+          and expert_user_id = #{userId}
+          and service_start = #{serviceStart}
+          and service_end = #{serviceEnd}
+        limit 1
+    </select>
+
+    <select id="selectLatestConfirmed" resultMap="TaskConflictResult">
+        select <include refid="confirmationColumns"/>
+        from expert_task_conflict_confirmation
+        where external_task_id = #{externalTaskId}
+          and expert_user_id = #{userId}
+          and status = 'CONFIRMED'
+          and service_start &lt; #{serviceEnd}
+          and service_end &gt; #{serviceStart}
+        order by confirmed_at desc, confirmation_id desc
+        limit 1
+    </select>
+
+    <select id="selectLatestByTask" resultMap="TaskConflictResult">
+        select <include refid="confirmationColumns"/>
+        from expert_task_conflict_confirmation
+        where external_task_id = #{externalTaskId}
+          and expert_user_id = #{userId}
+          and service_start &lt; #{serviceEnd}
+          and service_end &gt; #{serviceStart}
+        order by request_time desc, confirmation_id desc
+        limit 1
+    </select>
+
+    <select id="selectByExpert" resultMap="TaskConflictResult">
+        select <include refid="confirmationColumns"/>
+        from expert_task_conflict_confirmation
+        where expert_user_id = #{userId}
+        <if test="status != null and status != ''">
+            and status = #{status}
+        </if>
+        order by request_time desc, confirmation_id desc
+    </select>
+
+    <update id="confirm">
+        update expert_task_conflict_confirmation
+        set status = #{acceptanceStatus},
+            conflict_status = #{conflictStatus},
+            statement = #{statement},
+            confirmed_at = sysdate(),
+            version = version + 1
+        where confirmation_id = #{confirmationId}
+          and expert_user_id = #{userId}
+          and status = 'PENDING'
+          and version = #{version}
+    </update>
+
+    <update id="updateArrangement">
+        update expert_task_conflict_confirmation
+        set arrangement_status = #{targetStatus},
+            arranged_by = #{arrangedBy},
+            arranged_at = sysdate(),
+            arrangement_source = #{arrangementSource},
+            arrangement_version = #{arrangementVersion},
+            version = version + 1
+        where confirmation_id = #{confirmationId}
+          and status = 'ACCEPTED'
+          and arrangement_status = #{expectedStatus}
+          and version = #{version}
+    </update>
+
+    <insert id="upsertOccupancySnapshot">
+        insert into expert_business_context_snapshot
+            (expert_user_id, external_task_id, task_type, service_start, service_end,
+             service_mode, service_region, industry, occupancy_status, conflict_status,
+             source_system, source_kind, source_version, verified_at, create_by,
+             create_time, update_time)
+        values
+            (#{userId}, #{externalTaskId}, 'FORMAL_ARRANGEMENT',
+             #{serviceStart}, #{serviceEnd}, #{serviceMode}, #{serviceRegion},
+             #{industry}, #{occupancyStatus}, #{conflictStatus}, #{sourceSystem},
+             #{sourceKind}, #{sourceVersion}, sysdate(), #{operator}, sysdate(), sysdate())
+        on duplicate key update
+            task_type = values(task_type),
+            service_start = values(service_start),
+            service_end = values(service_end),
+            service_mode = values(service_mode),
+            service_region = values(service_region),
+            industry = values(industry),
+            occupancy_status = values(occupancy_status),
+            conflict_status = values(conflict_status),
+            source_kind = values(source_kind),
+            verified_at = sysdate(),
+            update_by = values(create_by),
+            update_time = sysdate()
+    </insert>
+</mapper>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.expert.mapper.ExpertRiskReviewMapper">
+
+    <resultMap id="RiskReviewResult" type="ExpertRiskReview">
+        <id property="riskId" column="risk_id"/>
+        <result property="evidenceId" column="evidence_id"/>
+        <result property="sourceEventId" column="source_event_id"/>
+        <result property="userId" column="expert_user_id"/>
+        <result property="realName" column="real_name"/>
+        <result property="creditScore" column="credit_score"/>
+        <result property="riskType" column="risk_type"/>
+        <result property="severity" column="severity"/>
+        <result property="title" column="title"/>
+        <result property="summary" column="summary"/>
+        <result property="status" column="status"/>
+        <result property="reviewerId" column="reviewer_id"/>
+        <result property="reviewerName" column="reviewer_name"/>
+        <result property="reviewComment" column="review_comment"/>
+        <result property="version" column="version"/>
+        <result property="sourceSystem" column="source_system"/>
+        <result property="sourceKind" column="source_kind"/>
+        <result property="occurredAt" column="occurred_at"/>
+        <result property="createTime" column="create_time"/>
+        <result property="resolvedTime" column="resolved_time"/>
+    </resultMap>
+
+    <sql id="riskColumns">
+        r.risk_id, r.evidence_id, r.source_event_id, r.expert_user_id, p.real_name,
+        r.risk_type, r.severity, r.title, r.summary, r.status,
+        r.reviewer_id, r.reviewer_name, r.review_comment, r.version,
+        r.source_system, r.source_kind, r.occurred_at,
+               r.create_time, r.resolved_time, coalesce(p.credit_score, 100) credit_score
+    </sql>
+
+    <insert id="insertRisk" parameterType="ExpertRiskReview"
+            useGeneratedKeys="true" keyProperty="riskId">
+        insert into expert_risk_review
+            (evidence_id, source_event_id, expert_user_id, risk_type, severity,
+             title, summary, status, source_system, source_kind, occurred_at,
+             version, create_time, update_time)
+        values
+            (#{evidenceId}, #{sourceEventId}, #{userId}, #{riskType}, #{severity},
+             #{title}, #{summary}, 'OPEN', #{sourceSystem}, #{sourceKind},
+             #{occurredAt}, 0, sysdate(), sysdate())
+    </insert>
+
+    <select id="selectById" resultMap="RiskReviewResult">
+        select <include refid="riskColumns"/>
+        from expert_risk_review r
+        left join expert_profile p on p.user_id = r.expert_user_id
+        where r.risk_id = #{riskId}
+    </select>
+
+    <select id="selectByIdForUpdate" resultMap="RiskReviewResult">
+        select <include refid="riskColumns"/>
+        from expert_risk_review r
+        left join expert_profile p on p.user_id = r.expert_user_id
+        where r.risk_id = #{riskId}
+        for update
+    </select>
+
+    <select id="selectBySource" resultMap="RiskReviewResult">
+        select <include refid="riskColumns"/>
+        from expert_risk_review r
+        left join expert_profile p on p.user_id = r.expert_user_id
+        where r.source_event_id = #{sourceEventId}
+          and r.risk_type = #{riskType}
+        limit 1
+    </select>
+
+    <select id="selectList" resultMap="RiskReviewResult">
+        select <include refid="riskColumns"/>
+        from expert_risk_review r
+        left join expert_profile p on p.user_id = r.expert_user_id
+        <where>
+            <if test="status != null and status != ''">
+                r.status = #{status}
+            </if>
+        </where>
+        order by r.create_time desc, r.risk_id desc
+    </select>
+
+    <select id="selectAcknowledgedByUserId" resultMap="RiskReviewResult">
+        select <include refid="riskColumns"/>
+        from expert_risk_review r
+        left join expert_profile p on p.user_id = r.expert_user_id
+        where r.expert_user_id = #{userId}
+          and r.status = 'ACKNOWLEDGED'
+        order by r.resolved_time desc, r.risk_id desc
+        limit #{limit}
+    </select>
+
+    <update id="resolveRisk">
+        update expert_risk_review
+        set status = #{status},
+            reviewer_id = #{reviewerId,jdbcType=BIGINT},
+            reviewer_name = #{reviewerName,jdbcType=VARCHAR},
+            review_comment = #{comment,jdbcType=VARCHAR},
+            version = version + 1,
+            resolved_time = sysdate(),
+            update_time = sysdate()
+        where risk_id = #{riskId}
+          and status = 'OPEN'
+          and version = #{version}
+    </update>
+</mapper>

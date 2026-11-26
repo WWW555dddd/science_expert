@@ -37,7 +37,6 @@ public class KnowledgeGraphQueryService
         Map<String, Object> result = new HashMap<>();
         result.put("registered", registered);
         result.put("schema", ontologyService.getOntology());
-        result.put("capabilityMappings", graphMapper.selectCapabilityMappings());
         return result;
     }
 
@@ -116,6 +115,89 @@ public class KnowledgeGraphQueryService
         result.put("relationCount", relations.size());
         result.put("entities", entities);
         result.put("relations", new ArrayList<>(relations.values()));
+        return result;
+    }
+
+    public Map<String, Object> overviewSubgraph(int requestedEntityLimit,
+            int requestedRelationLimit)
+    {
+        int entityLimit = Math.max(50, Math.min(requestedEntityLimit, 600));
+        int relationLimit = Math.max(100, Math.min(requestedRelationLimit, 1200));
+        List<Map<String, Object>> entities = graphMapper.selectOverviewEntities(entityLimit)
+                .stream()
+                .map(KnowledgeGraphQueryService::entityView)
+                .collect(Collectors.toCollection(ArrayList::new));
+        Set<Long> entityIds = entities.stream()
+                .map(item -> numberValue(item.get("entityId")))
+                .collect(Collectors.toSet());
+        List<Map<String, Object>> relations = graphMapper.selectOverviewRelations(relationLimit)
+                .stream()
+                .filter(item -> entityIds.contains(numberValue(item.get("sourceEntityId")))
+                        && entityIds.contains(numberValue(item.get("targetEntityId"))))
+                .map(KnowledgeGraphQueryService::relationView)
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        Map<String, Long> typeCounts = entities.stream().collect(Collectors.groupingBy(
+                item -> String.valueOf(item.get("entityType")),
+                LinkedHashMap::new, Collectors.counting()));
+        Map<Long, Set<Long>> entityExperts = new LinkedHashMap<>();
+        Map<Long, Set<Long>> industryExperts = new LinkedHashMap<>();
+        for (Map<String, Object> relation : relations)
+        {
+            Long sourceId = numberValue(relation.get("sourceEntityId"));
+            Long targetId = numberValue(relation.get("targetEntityId"));
+            String sourceType = String.valueOf(relation.get("sourceEntityType"));
+            String targetType = String.valueOf(relation.get("targetEntityType"));
+            if ("HAS_EXPERT".equals(relation.get("relationType"))
+                    && "Industry".equals(sourceType) && "Expert".equals(targetType))
+            {
+                industryExperts.computeIfAbsent(sourceId, key -> new LinkedHashSet<>())
+                        .add(targetId);
+                entityExperts.computeIfAbsent(sourceId, key -> new LinkedHashSet<>())
+                        .add(targetId);
+            }
+            else if ("Expert".equals(sourceType) && !"Expert".equals(targetType))
+            {
+                entityExperts.computeIfAbsent(targetId, key -> new LinkedHashSet<>())
+                        .add(sourceId);
+            }
+            else if ("Expert".equals(targetType) && !"Expert".equals(sourceType))
+            {
+                entityExperts.computeIfAbsent(sourceId, key -> new LinkedHashSet<>())
+                        .add(targetId);
+            }
+        }
+        long sharedEntityCount = entityExperts.values().stream()
+                .filter(items -> items.size() > 1).count();
+
+        List<Map<String, Object>> industryGroups = new ArrayList<>();
+        for (Map<String, Object> entity : entities)
+        {
+            if (!"Industry".equals(entity.get("entityType")))
+            {
+                continue;
+            }
+            Map<String, Object> group = new LinkedHashMap<>();
+            group.put("industryEntityId", entity.get("entityId"));
+            group.put("industryName", entity.get("canonicalName"));
+            group.put("expertCount", industryExperts
+                    .getOrDefault(numberValue(entity.get("entityId")), Set.of()).size());
+            industryGroups.add(group);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", "READY");
+        result.put("scope", "ALL_EXPERTS");
+        result.put("ontologyVersion", KnowledgeGraphOntologyService.ONTOLOGY_VERSION);
+        result.put("entityCount", entities.size());
+        result.put("relationCount", relations.size());
+        result.put("expertCount", typeCounts.getOrDefault("Expert", 0L));
+        result.put("industryCount", typeCounts.getOrDefault("Industry", 0L));
+        result.put("sharedEntityCount", sharedEntityCount);
+        result.put("typeCounts", typeCounts);
+        result.put("industryGroups", industryGroups);
+        result.put("entities", entities);
+        result.put("relations", relations);
         return result;
     }
 

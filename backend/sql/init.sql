@@ -932,6 +932,7 @@ CREATE TABLE IF NOT EXISTS expert_profile (
     career_summary TEXT COMMENT '专家简介',
     review_status VARCHAR(32) NOT NULL DEFAULT 'DRAFT' COMMENT '审核状态',
     service_status VARCHAR(32) NOT NULL DEFAULT 'PENDING_CERTIFICATION' COMMENT '接单状态',
+    credit_score INT NOT NULL DEFAULT 100 COMMENT '信誉积分',
     profile_completion INT NOT NULL DEFAULT 0 COMMENT '档案完成度',
     latest_submit_time DATETIME DEFAULT NULL COMMENT '最近提交时间',
     approved_time DATETIME DEFAULT NULL COMMENT '审核通过时间',
@@ -947,6 +948,26 @@ CREATE TABLE IF NOT EXISTS expert_profile (
     KEY idx_expert_profile_review_status (review_status),
     KEY idx_expert_profile_service_status (service_status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家档案';
+
+CREATE TABLE IF NOT EXISTS expert_credit_log (
+    credit_log_id BIGINT NOT NULL AUTO_INCREMENT,
+    user_id BIGINT NOT NULL,
+    change_type VARCHAR(32) NOT NULL COMMENT 'RISK_DEDUCTION/RESTORE_APPROVED',
+    risk_id BIGINT DEFAULT NULL COMMENT '关联风险预警',
+    request_id BIGINT DEFAULT NULL COMMENT '关联状态申请',
+    before_score INT NOT NULL,
+    after_score INT NOT NULL,
+    delta INT NOT NULL,
+    reason VARCHAR(500) DEFAULT NULL,
+    operator_id BIGINT DEFAULT NULL,
+    operator_name VARCHAR(64) DEFAULT NULL,
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (credit_log_id),
+    UNIQUE KEY uk_credit_risk_deduction (change_type, risk_id),
+    KEY idx_credit_log_user_time (user_id, create_time),
+    CONSTRAINT fk_credit_log_profile FOREIGN KEY (user_id)
+        REFERENCES expert_profile(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家信誉积分变更记录';
 
 CREATE TABLE IF NOT EXISTS expert_schedule (
     schedule_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '时间表ID',
@@ -965,6 +986,23 @@ CREATE TABLE IF NOT EXISTS expert_schedule (
     KEY idx_expert_schedule_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家可服务时间表';
 
+CREATE TABLE IF NOT EXISTS expert_unavailable_period (
+    unavailable_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '临时不可用时段ID',
+    user_id BIGINT NOT NULL COMMENT '专家用户ID',
+    start_time DATETIME NOT NULL COMMENT '不可用开始时间',
+    end_time DATETIME NOT NULL COMMENT '不可用结束时间',
+    reason VARCHAR(500) DEFAULT NULL COMMENT '不可用原因',
+    version INT NOT NULL DEFAULT 0 COMMENT '并发更新版本',
+    create_by VARCHAR(64) DEFAULT '',
+    create_time DATETIME DEFAULT NULL,
+    update_by VARCHAR(64) DEFAULT '',
+    update_time DATETIME DEFAULT NULL,
+    PRIMARY KEY (unavailable_id),
+    KEY idx_expert_unavailable_user_time (user_id, start_time, end_time),
+    CONSTRAINT fk_expert_unavailable_profile FOREIGN KEY (user_id)
+        REFERENCES expert_profile(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家临时不可用时段';
+
 CREATE TABLE IF NOT EXISTS expert_material (
     material_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '材料ID',
     user_id BIGINT NOT NULL COMMENT '专家用户ID',
@@ -982,6 +1020,8 @@ CREATE TABLE IF NOT EXISTS expert_material (
     issue_count INT NOT NULL DEFAULT 0 COMMENT '预审问题数',
     agent_message VARCHAR(1000) DEFAULT NULL COMMENT 'Agent处理摘要',
     review_comment VARCHAR(1000) DEFAULT NULL COMMENT '审核意见',
+    valid_from DATE DEFAULT NULL COMMENT '资质有效期开始',
+    valid_until DATE DEFAULT NULL COMMENT '资质有效期结束',
     create_by VARCHAR(64) DEFAULT '',
     create_time DATETIME DEFAULT NULL,
     update_by VARCHAR(64) DEFAULT '',
@@ -993,12 +1033,43 @@ CREATE TABLE IF NOT EXISTS expert_material (
     KEY idx_expert_material_processing (job_status, processing_started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家资料文件及处理状态';
 
+CREATE TABLE IF NOT EXISTS expert_material_file (
+    file_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '版本内文件ID',
+    material_id BIGINT NOT NULL COMMENT '材料版本ID',
+    file_name VARCHAR(255) NOT NULL COMMENT '原始文件名',
+    file_path VARCHAR(512) NOT NULL COMMENT '服务器或MinIO路径',
+    file_type VARCHAR(32) DEFAULT NULL COMMENT '文件类型',
+    file_size BIGINT NOT NULL DEFAULT 0 COMMENT '文件大小',
+    sort_no INT NOT NULL DEFAULT 0 COMMENT '展示顺序',
+    create_by VARCHAR(64) DEFAULT '',
+    create_time DATETIME DEFAULT NULL,
+    update_by VARCHAR(64) DEFAULT '',
+    update_time DATETIME DEFAULT NULL,
+    PRIMARY KEY (file_id),
+    KEY idx_expert_material_file_material (material_id, sort_no, file_id),
+    CONSTRAINT fk_expert_material_file_material FOREIGN KEY (material_id)
+        REFERENCES expert_material(material_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家材料版本内文件';
+
+INSERT INTO expert_material_file
+    (material_id, file_name, file_path, file_type, file_size, sort_no,
+     create_by, create_time, update_by, update_time)
+SELECT m.material_id, m.file_name, m.file_path, m.file_type, m.file_size, 0,
+       m.create_by, m.create_time, m.update_by, m.update_time
+FROM expert_material m
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM expert_material_file f
+    WHERE f.material_id = m.material_id
+);
+
 CREATE TABLE IF NOT EXISTS expert_certification_angle (
     category_code VARCHAR(64) NOT NULL COMMENT '认证角度编码',
     angle_name VARCHAR(64) NOT NULL COMMENT '认证角度名称',
     required_flag CHAR(1) NOT NULL DEFAULT '0' COMMENT '是否必选：1是 0否',
     sort_no INT NOT NULL DEFAULT 0,
     enabled CHAR(1) NOT NULL DEFAULT '0' COMMENT '是否启用：0是 1否',
+    validity_required CHAR(1) NOT NULL DEFAULT '0' COMMENT '是否登记有效期：1是 0否',
     description VARCHAR(255) DEFAULT NULL,
     PRIMARY KEY (category_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家认证角度定义';
@@ -1009,15 +1080,40 @@ CREATE TABLE IF NOT EXISTS expert_field_mapping (
     db_field VARCHAR(64) NOT NULL COMMENT '标准字段',
     file_field VARCHAR(128) DEFAULT NULL COMMENT '文件字段',
     extracted_value VARCHAR(1000) DEFAULT NULL COMMENT '提取值（已脱敏）',
+    reviewed_value VARCHAR(1000) DEFAULT NULL COMMENT '审核人修订后的提取值',
     confidence DECIMAL(5,2) NOT NULL DEFAULT 0 COMMENT '置信度',
+    reviewed_confidence DECIMAL(5,2) DEFAULT NULL COMMENT '审核人修订后的置信度',
     evidence VARCHAR(500) DEFAULT NULL COMMENT '证据位置',
+    reviewed_evidence VARCHAR(1000) DEFAULT NULL COMMENT '审核人修订后的证据说明',
     conflict_flag CHAR(1) NOT NULL DEFAULT '0' COMMENT '是否冲突',
+    review_status VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT 'AI结果人工确认状态',
+    review_comment VARCHAR(500) DEFAULT NULL COMMENT 'AI结果确认意见',
+    reviewer_name VARCHAR(64) DEFAULT NULL COMMENT '确认人',
+    review_time DATETIME DEFAULT NULL COMMENT '确认时间',
     create_time DATETIME DEFAULT NULL,
     PRIMARY KEY (mapping_id),
     KEY idx_expert_mapping_material (material_id),
     CONSTRAINT fk_expert_mapping_material FOREIGN KEY (material_id)
         REFERENCES expert_material(material_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='文件字段与标准字段映射';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='材料基本信息提取结果';
+
+CREATE TABLE IF NOT EXISTS expert_qualification_reminder (
+    reminder_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '提醒ID',
+    user_id BIGINT NOT NULL COMMENT '专家用户ID',
+    material_id BIGINT NOT NULL COMMENT '资质材料ID',
+    material_category VARCHAR(64) NOT NULL COMMENT '材料类别',
+    expiry_date DATE NOT NULL COMMENT '到期日期',
+    reminder_type VARCHAR(16) NOT NULL COMMENT 'EXPIRING/EXPIRED',
+    reminder_status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE/RESOLVED',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (reminder_id),
+    UNIQUE KEY uk_expert_qualification_reminder
+        (material_id, expiry_date, reminder_type),
+    KEY idx_expert_qualification_reminder_user (user_id, reminder_status),
+    CONSTRAINT fk_expert_qualification_reminder_material FOREIGN KEY (material_id)
+        REFERENCES expert_material(material_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家资质到期提醒';
 
 CREATE TABLE IF NOT EXISTS expert_review_log (
     log_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '日志ID',
@@ -1048,6 +1144,28 @@ CREATE TABLE IF NOT EXISTS expert_status_log (
     KEY idx_expert_status_log_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家接单状态变更记录';
 
+CREATE TABLE IF NOT EXISTS expert_status_request (
+    request_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '申请ID',
+    user_id BIGINT NOT NULL COMMENT '专家用户ID',
+    source_status VARCHAR(32) NOT NULL COMMENT '申请时接单状态',
+    target_status VARCHAR(32) NOT NULL COMMENT '目标接单状态',
+    request_status VARCHAR(16) NOT NULL DEFAULT 'PENDING' COMMENT 'PENDING/APPROVED/REJECTED/CANCELLED',
+    reason VARCHAR(500) NOT NULL COMMENT '申请原因',
+    credit_related CHAR(1) NOT NULL DEFAULT '0' COMMENT '是否信用相关',
+    requester_id BIGINT NOT NULL COMMENT '申请人ID',
+    requester_name VARCHAR(64) DEFAULT NULL COMMENT '申请人',
+    reviewer_id BIGINT DEFAULT NULL COMMENT '审核人ID',
+    reviewer_name VARCHAR(64) DEFAULT NULL COMMENT '审核人',
+    review_comment VARCHAR(1000) DEFAULT NULL COMMENT '审核意见',
+    request_version INT NOT NULL DEFAULT 0 COMMENT '申请乐观锁版本',
+    create_time DATETIME DEFAULT NULL,
+    update_time DATETIME DEFAULT NULL,
+    resolved_time DATETIME DEFAULT NULL COMMENT '处理时间',
+    PRIMARY KEY (request_id),
+    KEY idx_expert_status_request_user (user_id, request_status),
+    KEY idx_expert_status_request_status_time (request_status, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家接单状态变更申请';
+
 CREATE TABLE IF NOT EXISTS expert_approved (
     approved_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '正式库ID',
     user_id BIGINT NOT NULL COMMENT '专家用户ID',
@@ -1066,6 +1184,25 @@ CREATE TABLE IF NOT EXISTS expert_approved (
     UNIQUE KEY uk_expert_approved_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='已审核专家正式库';
 
+CREATE TABLE IF NOT EXISTS expert_release_version (
+    release_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '审核发布版本ID',
+    user_id BIGINT NOT NULL COMMENT '专家用户ID',
+    version_no INT NOT NULL COMMENT '专家审核版本号',
+    graph_version INT NOT NULL DEFAULT 0 COMMENT '当时画像版本号',
+    source_material_versions_json LONGTEXT NOT NULL COMMENT '当时生效的材料类别与版本',
+    profile_snapshot_json LONGTEXT NOT NULL COMMENT '30维画像快照',
+    graph_snapshot_json LONGTEXT NOT NULL COMMENT '知识图谱快照',
+    approved_by VARCHAR(64) DEFAULT NULL COMMENT '触发该版本的审核人',
+    trigger_type VARCHAR(32) NOT NULL DEFAULT 'MATERIAL_APPROVED'
+        COMMENT '版本触发类型',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (release_id),
+    UNIQUE KEY uk_expert_release_version (user_id, version_no),
+    KEY idx_expert_release_user_time (user_id, create_time),
+    CONSTRAINT fk_expert_release_profile FOREIGN KEY (user_id)
+        REFERENCES expert_profile(user_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家画像与知识图谱审核版本快照';
+
 CREATE TABLE IF NOT EXISTS expert_dimension_definition (
     dimension_code VARCHAR(64) NOT NULL COMMENT '维度编码',
     group_code VARCHAR(32) NOT NULL COMMENT '维度分组',
@@ -1077,6 +1214,35 @@ CREATE TABLE IF NOT EXISTS expert_dimension_definition (
     description VARCHAR(255) DEFAULT NULL,
     PRIMARY KEY (dimension_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家能力画像维度定义';
+
+CREATE TABLE IF NOT EXISTS expert_dimension_assessment (
+    assessment_id BIGINT NOT NULL AUTO_INCREMENT COMMENT '画像维度材料评估ID',
+    user_id BIGINT NOT NULL COMMENT '专家用户ID',
+    material_id BIGINT NOT NULL COMMENT '认证材料ID',
+    dimension_code VARCHAR(64) NOT NULL COMMENT '画像维度编码',
+    score DECIMAL(5,2) NOT NULL COMMENT '材料级画像分',
+    reviewed_score DECIMAL(5,2) DEFAULT NULL COMMENT '审核人修订后的维度分',
+    confidence DECIMAL(5,2) NOT NULL COMMENT '置信度',
+    evidence VARCHAR(1000) NOT NULL COMMENT '材料内证据',
+    reviewed_evidence VARCHAR(1000) DEFAULT NULL COMMENT '审核人修订后的维度证据',
+    review_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+        COMMENT 'PENDING/ACCEPTED/REJECTED',
+    review_comment VARCHAR(500) DEFAULT NULL COMMENT 'AI结果审核意见',
+    reviewer_name VARCHAR(64) DEFAULT NULL COMMENT 'AI结果审核人',
+    review_time DATETIME DEFAULT NULL COMMENT 'AI结果审核时间',
+    rule_version VARCHAR(64) NOT NULL COMMENT '画像评分规则版本',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (assessment_id),
+    UNIQUE KEY uk_dimension_assessment_material (material_id, dimension_code),
+    KEY idx_dimension_assessment_user (user_id, review_status, dimension_code),
+    CONSTRAINT fk_dimension_assessment_profile FOREIGN KEY (user_id)
+        REFERENCES expert_profile(user_id) ON DELETE CASCADE,
+    CONSTRAINT fk_dimension_assessment_material FOREIGN KEY (material_id)
+        REFERENCES expert_material(material_id) ON DELETE CASCADE,
+    CONSTRAINT fk_dimension_assessment_definition FOREIGN KEY (dimension_code)
+        REFERENCES expert_dimension_definition(dimension_code) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='30维画像逐材料评估，独立于知识图谱';
 
 CREATE TABLE IF NOT EXISTS expert_graph_score (
     score_id BIGINT NOT NULL AUTO_INCREMENT,
@@ -1176,6 +1342,7 @@ VALUES
 (3510, '审核工作台', 3500, 1, 'workspace', 'review/workspace/index', '', 'ReviewWorkspace', 1, 0, 'C', '0', '0', 'review:workspace:view', 'dashboard', 'admin', NOW(), '', NULL, '审核工作台'),
 (3520, '审核队列', 3500, 2, 'queue', 'review/queue/index', '', 'ReviewQueue', 1, 0, 'C', '0', '0', 'review:queue:list', 'list', 'admin', NOW(), '', NULL, '待审核专家'),
 (3530, '已审核专家', 3500, 3, 'approved', 'review/approved/index', '', 'ReviewApproved', 1, 0, 'C', '0', '0', 'review:approved:list', 'checkbox', 'admin', NOW(), '', NULL, '正式专家库'),
+(3540, '专家状态与信誉审核', 3500, 4, 'status-review', 'review/status/index', '', 'ReviewStatus', 1, 0, 'C', '0', '0', 'review:action', 'switch', 'admin', NOW(), '', NULL, '审核专家退出与信誉恢复申请'),
 (4000, '管理控制台', 0, 8, 'management-center', 'expert/admin/index', '', 'ManagementCenter', 1, 0, 'C', '0', '0', 'expert:admin:view', 'monitor', 'admin', NOW(), '', NULL, '平台管理员工作台'),
 (4100, '专家管理', 0, 1, 'expert-management', NULL, '', 'ExpertManagement', 1, 0, 'M', '0', '0', '', 'peoples', 'admin', NOW(), '', NULL, '管理员维护全部专家总体情况'),
 (4110, '专家总体情况', 4100, 1, 'list', 'expert/admin/experts/index', '', 'ExpertManagementList', 1, 0, 'C', '0', '0', 'expert:admin:expert:list', 'table', 'admin', NOW(), '', NULL, '全部专家档案与认证情况'),
@@ -1199,13 +1366,14 @@ SELECT 1001, menu_id FROM (
 INSERT IGNORE INTO sys_role_menu(role_id, menu_id)
 SELECT 1002, menu_id FROM (
     SELECT 3500 menu_id UNION ALL SELECT 3510 UNION ALL SELECT 3520
-    UNION ALL SELECT 3530 UNION ALL SELECT 3511 UNION ALL SELECT 3512
+    UNION ALL SELECT 3530 UNION ALL SELECT 3540
+    UNION ALL SELECT 3511 UNION ALL SELECT 3512
 ) review_menus;
 
 INSERT IGNORE INTO sys_role_menu(role_id, menu_id)
 SELECT 1, menu_id FROM (
     SELECT 3500 menu_id UNION ALL SELECT 3510 UNION ALL SELECT 3520
-    UNION ALL SELECT 3530 UNION ALL SELECT 4000
+    UNION ALL SELECT 3530 UNION ALL SELECT 3540 UNION ALL SELECT 4000
     UNION ALL SELECT 3511 UNION ALL SELECT 3512
     UNION ALL SELECT 4100 UNION ALL SELECT 4110 UNION ALL SELECT 4111 UNION ALL SELECT 4112
 ) admin_menus;
@@ -1220,34 +1388,35 @@ INSERT IGNORE INTO expert_dimension_definition(dimension_code, group_code, group
 ('TECH_METHOD_TOOL', 'TECHNICAL', '专业技术能力', '方法与工具应用', 1.10, '0', 7, '运用检测、仿真、实验、工程分析等方法与工具的能力'),
 ('TECH_EVIDENCE_COLLECTION', 'TECHNICAL', '专业技术能力', '现场取证与证据分析', 1.30, '0', 8, '现场勘查、样品采集、资料核验和证据链构建能力'),
 ('TECH_APPRAISAL_LOSS', 'TECHNICAL', '专业技术能力', '技术鉴定与损失核定', 1.50, '0', 9, '形成技术鉴定意见、损失范围和核定依据的能力'),
-('IND_ELECTRONICS', 'INDUSTRY', '重点产业覆盖', '电子信息', 1.00, '0', 10, '服务电子信息、半导体、通信和软件相关产业的能力'),
-('IND_NONFERROUS', 'INDUSTRY', '重点产业覆盖', '有色金属', 1.00, '0', 11, '服务有色金属采选、冶炼、加工及相关装备的能力'),
-('IND_EQUIPMENT', 'INDUSTRY', '重点产业覆盖', '装备制造', 1.00, '0', 12, '服务智能装备、工业制造和自动化系统的能力'),
-('IND_NEW_ENERGY', 'INDUSTRY', '重点产业覆盖', '新能源', 1.00, '0', 13, '服务新能源、储能、电力电子和绿色能源产业的能力'),
-('IND_BIOMED', 'INDUSTRY', '重点产业覆盖', '生物医药', 1.00, '0', 14, '服务生物医药、医疗器械和健康技术产业的能力'),
-('IND_CHEM_MATERIAL', 'INDUSTRY', '重点产业覆盖', '化工与新材料', 1.00, '0', 15, '服务化工中试、新材料研发和工程验证的能力'),
-('SCENE_PRE_SURVEY', 'SCENARIO', '保险服务场景', '保前风险勘查', 1.50, '0', 16, '承保前开展技术风险识别、现场勘查和风险建议的能力'),
-('SCENE_RISK_REDUCTION', 'SCENARIO', '保险服务场景', '保中风险减量', 1.40, '0', 17, '承保期间开展隐患治理、风险监测和减量服务的能力'),
-('SCENE_CLAIM_INSPECTION', 'SCENARIO', '保险服务场景', '出险查勘', 1.50, '0', 18, '事故发生后开展现场查勘、事实核验和原因判断的能力'),
-('SCENE_TECH_APPRAISAL', 'SCENARIO', '保险服务场景', '技术鉴定服务', 1.50, '0', 19, '面向保险理赔和争议处理提供独立技术鉴定的能力'),
-('SCENE_TECH_RESCUE', 'SCENARIO', '保险服务场景', '技术救助', 1.30, '0', 20, '为事故处置、止损、恢复和技术救援提供专业支持的能力'),
-('SERVICE_REGION', 'DELIVERY', '履约交付与合规', '区域覆盖', 1.20, '0', 21, '能够及时到达或远程支持目标服务区域的能力'),
-('SERVICE_RESPONSE', 'DELIVERY', '履约交付与合规', '响应时效', 1.40, '0', 22, '接单确认、到场和成果反馈的及时性'),
-('SERVICE_MODE', 'DELIVERY', '履约交付与合规', '远程与现场适配', 0.90, '0', 23, '按任务要求提供远程研判或现场服务的能力'),
-('SERVICE_COMPLIANCE', 'DELIVERY', '履约交付与合规', '规范与保密合规', 1.50, '0', 24, '遵守服务规范、保密要求、回避规则和证据留存要求'),
-('SERVICE_COST', 'DELIVERY', '履约交付与合规', '费用合理性', 1.10, '0', 25, '服务报价与工作量、专家级别及市场标准相匹配的程度'),
-('PERF_SIMILAR_PROJECT', 'PERFORMANCE', '历史实绩与知识复用', '同类项目经验', 1.50, '0', 26, '完成同类产业、风险类型和服务场景项目的经验'),
-('PERF_REPORT_QUALITY', 'PERFORMANCE', '历史实绩与知识复用', '历史报告质量', 1.50, '0', 27, '技术报告、鉴定意见和风险建议的完整性、规范性与可用性'),
-('PERF_COMPLETION_CREDIT', 'PERFORMANCE', '历史实绩与知识复用', '履约与信用', 1.50, '0', 28, '任务完成率、按期履约、投诉和违规记录的综合表现'),
-('PERF_COLLABORATION', 'PERFORMANCE', '历史实绩与知识复用', '多专家协同', 1.00, '0', 29, '跨单位、跨专业协同和成果汇总能力'),
-('PERF_KNOWLEDGE_REUSE', 'PERFORMANCE', '历史实绩与知识复用', '案例与知识复用', 1.20, '0', 30, '沉淀案例、报告模板、标准、专利或方法并在新任务中复用的能力');
+('ADAPT_DOMAIN_DEPTH', 'ADAPTATION', '领域迁移与知识适配', '专业领域深度', 1.20, '0', 10, '在核心专业方向形成持续积累并具备深入解决专业问题的能力'),
+('ADAPT_CROSS_DOMAIN', 'ADAPTATION', '领域迁移与知识适配', '跨领域迁移', 1.30, '0', 11, '将已有知识和方法迁移到新产业、新技术和新风险场景的能力'),
+('ADAPT_METHOD_REUSE', 'ADAPTATION', '领域迁移与知识适配', '方法工具复用', 1.10, '0', 12, '将检测、仿真、建模、工程分析或评估方法复用于新问题的能力'),
+('SCENE_PRE_SURVEY', 'SCENARIO', '保险服务场景', '保前风险勘查', 1.50, '0', 13, '承保前开展技术风险识别、现场勘查和风险建议的能力'),
+('SCENE_RISK_REDUCTION', 'SCENARIO', '保险服务场景', '保中风险减量', 1.40, '0', 14, '承保期间开展隐患治理、风险监测和减量服务的能力'),
+('SCENE_CLAIM_INSPECTION', 'SCENARIO', '保险服务场景', '出险查勘', 1.50, '0', 15, '事故发生后开展现场查勘、事实核验和原因判断的能力'),
+('SCENE_TECH_APPRAISAL', 'SCENARIO', '保险服务场景', '技术鉴定服务', 1.50, '0', 16, '面向保险理赔和争议处理提供独立技术鉴定的能力'),
+('SCENE_TECH_RESCUE', 'SCENARIO', '保险服务场景', '技术救助', 1.30, '0', 17, '为事故处置、止损、恢复和技术救援提供专业支持的能力'),
+('SERVICE_REGION', 'DELIVERY', '履约交付与合规', '区域覆盖', 1.20, '0', 18, '能够及时到达或远程支持目标服务区域的能力'),
+('SERVICE_RESPONSE', 'DELIVERY', '履约交付与合规', '响应时效', 1.40, '0', 19, '接单确认、到场和成果反馈的及时性'),
+('SERVICE_MODE', 'DELIVERY', '履约交付与合规', '远程与现场适配', 0.90, '0', 20, '按任务要求提供远程研判或现场服务的能力'),
+('SERVICE_COMPLIANCE', 'DELIVERY', '履约交付与合规', '规范与保密合规', 1.50, '0', 21, '遵守服务规范、保密要求、回避规则和证据留存要求'),
+('SERVICE_COST', 'DELIVERY', '履约交付与合规', '费用合理性', 1.10, '0', 22, '服务报价与工作量、专家级别及市场标准相匹配的程度'),
+('PERF_SIMILAR_PROJECT', 'PERFORMANCE', '历史实绩与知识复用', '同类项目经验', 1.50, '0', 23, '完成同类产业、风险类型和服务场景项目的经验'),
+('PERF_REPORT_QUALITY', 'PERFORMANCE', '历史实绩与知识复用', '历史报告质量', 1.50, '0', 24, '技术报告、鉴定意见和风险建议的完整性、规范性与可用性'),
+('PERF_COMPLETION_CREDIT', 'PERFORMANCE', '历史实绩与知识复用', '履约与信用', 1.50, '0', 25, '任务完成率、按期履约、投诉和违规记录的综合表现'),
+('PERF_KNOWLEDGE_REUSE', 'PERFORMANCE', '历史实绩与知识复用', '案例与知识复用', 1.20, '0', 26, '沉淀案例、报告模板、标准、专利或方法并在新任务中复用的能力'),
+('CONFLICT_DISCLOSURE_COMPLETE', 'CONFLICT', '利益冲突与独立性', '利益关系披露', 1.50, '0', 27, '完整披露本人及近亲属与客户、项目参与方和保险标的之间的利益关系'),
+('CONFLICT_RELATION_TRANSPARENCY', 'CONFLICT', '利益冲突与独立性', '关联关系透明', 1.40, '0', 28, '对任职、兼职、顾问、股权和合作项目等关联关系作出清晰且可核验的说明'),
+('CONFLICT_COMMERCIAL_INDEPENDENCE', 'CONFLICT', '利益冲突与独立性', '商业利益独立', 1.50, '0', 29, '不存在可能影响独立判断的报酬、返佣、推荐收益、股权或其他商业利益'),
+('CONFLICT_RECUSAL_MECHANISM', 'CONFLICT', '利益冲突与独立性', '回避机制执行', 1.40, '0', 30, '能够主动识别潜在利益冲突并执行回避、补充申报和独立判断要求');
 
-INSERT IGNORE INTO expert_certification_angle(category_code, angle_name, required_flag, sort_no, enabled, description) VALUES
-('IDENTITY', '身份证明', '1', 1, '0', '身份证明或相关身份材料'),
-('QUALIFICATION', '学历职称', '1', 2, '0', '学历、学位和职称材料'),
-('CERTIFICATE', '职业资格', '1', 3, '0', '专业职业资格或执业证书'),
-('ACHIEVEMENT', '代表成果', '1', 4, '0', '代表性项目、成果或业绩材料'),
-('OTHER', '其他材料', '0', 5, '0', '补充说明材料，不参与整体认证判定');
+INSERT IGNORE INTO expert_certification_angle(category_code, angle_name, required_flag, sort_no, enabled, validity_required, description) VALUES
+('IDENTITY', '身份证明', '1', 1, '0', '0', '身份证明或相关身份材料'),
+('QUALIFICATION', '学历职称', '1', 2, '0', '1', '学历、学位和职称材料'),
+('CERTIFICATE', '职业资格', '1', 3, '0', '1', '专业职业资格或执业证书'),
+('ACHIEVEMENT', '代表成果', '1', 4, '0', '0', '代表性项目、成果或业绩材料'),
+('SERVICE_EXPERIENCE', '服务经历', '0', 5, '0', '0', '代表性服务项目、服务对象、承担工作、服务时间及成果说明'),
+('OTHER', '利益冲突说明', '1', 6, '0', '0', '说明本人及近亲属与客户、项目参与方、保险标的之间的利益关系、关联关系和回避安排，审核通过后方可完成整体认证');
 
 UPDATE expert_material
 SET job_status = 'REVIEWED', update_time = NOW()
@@ -1393,7 +1562,18 @@ CREATE TABLE IF NOT EXISTS kg_evidence (
     char_end INT DEFAULT NULL,
     quote_hash VARCHAR(64) DEFAULT NULL,
     excerpt VARCHAR(1000) DEFAULT NULL,
+    reviewed_excerpt VARCHAR(1000) DEFAULT NULL COMMENT '审核人修订后的关系证据',
+    reviewed_source_name VARCHAR(255) DEFAULT NULL COMMENT '审核人修订后的源节点名称',
+    reviewed_source_type VARCHAR(64) DEFAULT NULL COMMENT '审核人修订后的源节点类型',
+    reviewed_relation_type VARCHAR(64) DEFAULT NULL COMMENT '审核人修订后的关系类型',
+    reviewed_target_name VARCHAR(255) DEFAULT NULL COMMENT '审核人修订后的目标节点名称',
+    reviewed_target_type VARCHAR(64) DEFAULT NULL COMMENT '审核人修订后的目标节点类型',
     confidence DECIMAL(5,2) NOT NULL DEFAULT 1.00,
+    review_status VARCHAR(16) NOT NULL DEFAULT 'PENDING'
+        COMMENT 'PENDING/ACCEPTED/REJECTED',
+    review_comment VARCHAR(500) DEFAULT NULL COMMENT '关系证据审核意见',
+    reviewer_name VARCHAR(64) DEFAULT NULL COMMENT '关系证据审核人',
+    review_time DATETIME DEFAULT NULL COMMENT '关系证据审核时间',
     extractor_version VARCHAR(64) DEFAULT NULL,
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (evidence_id),
@@ -1447,16 +1627,6 @@ VALUES
     ('expert-domain-v1', '科技保险专家领域本体 V1',
      'classpath:knowledge-graph/ontology-v1.json', 'ACTIVE', NOW(), NOW());
 
-INSERT IGNORE INTO kg_dimension_capability_map
-    (dimension_code, capability_code, capability_name, ontology_version, create_time)
-SELECT dimension_code,
-       CONCAT('CAP_', dimension_code),
-       dimension_name,
-       'expert-domain-v1',
-       NOW()
-FROM expert_dimension_definition
-WHERE enabled = '0';
-
 -- ============================================================
 -- Source: expert_agent_runtime_v1.sql
 -- ============================================================
@@ -1499,137 +1669,11 @@ CREATE TABLE IF NOT EXISTS expert_agent_step (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='知识图谱 Agent 工具调用轨迹';
 
 -- ============================================================
--- Source: expert_quality_evaluation_v1.sql
--- ============================================================
--- 专家抽取质量与画像一致性评估
-
-CREATE TABLE IF NOT EXISTS expert_eval_dataset (
-    dataset_id BIGINT NOT NULL AUTO_INCREMENT,
-    dataset_name VARCHAR(128) NOT NULL,
-    dataset_version VARCHAR(32) NOT NULL,
-    description VARCHAR(1000) DEFAULT NULL,
-    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
-    create_by VARCHAR(64) DEFAULT NULL,
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (dataset_id),
-    UNIQUE KEY uk_eval_dataset_version (dataset_name, dataset_version)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家质量评估数据集';
-
-CREATE TABLE IF NOT EXISTS expert_eval_case (
-    case_id BIGINT NOT NULL AUTO_INCREMENT,
-    dataset_id BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
-    case_name VARCHAR(128) NOT NULL,
-    gold_fields_json JSON DEFAULT NULL,
-    gold_entities_json JSON DEFAULT NULL,
-    gold_relations_json JSON DEFAULT NULL,
-    gold_conflicts_json JSON DEFAULT NULL,
-    notes VARCHAR(1000) DEFAULT NULL,
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (case_id),
-    UNIQUE KEY uk_eval_case_user (dataset_id, user_id),
-    CONSTRAINT fk_eval_case_dataset FOREIGN KEY (dataset_id)
-        REFERENCES expert_eval_dataset(dataset_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家质量评估案例';
-
-CREATE TABLE IF NOT EXISTS expert_eval_run (
-    run_id BIGINT NOT NULL AUTO_INCREMENT,
-    dataset_id BIGINT NOT NULL,
-    run_status VARCHAR(16) NOT NULL DEFAULT 'RUNNING',
-    case_count INT NOT NULL DEFAULT 0,
-    metrics_json JSON DEFAULT NULL,
-    report_json LONGTEXT DEFAULT NULL,
-    error_message VARCHAR(1000) DEFAULT NULL,
-    create_by VARCHAR(64) DEFAULT NULL,
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (run_id),
-    KEY idx_eval_run_dataset (dataset_id, create_time),
-    CONSTRAINT fk_eval_run_dataset FOREIGN KEY (dataset_id)
-        REFERENCES expert_eval_dataset(dataset_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家质量评估运行';
-
-CREATE TABLE IF NOT EXISTS expert_eval_case_result (
-    result_id BIGINT NOT NULL AUTO_INCREMENT,
-    run_id BIGINT NOT NULL,
-    case_id BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
-    metrics_json JSON DEFAULT NULL,
-    detail_json LONGTEXT DEFAULT NULL,
-    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (result_id),
-    KEY idx_eval_result_run (run_id),
-    CONSTRAINT fk_eval_result_run FOREIGN KEY (run_id)
-        REFERENCES expert_eval_run(run_id) ON DELETE CASCADE,
-    CONSTRAINT fk_eval_result_case FOREIGN KEY (case_id)
-        REFERENCES expert_eval_case(case_id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='专家质量评估逐案例结果';
-
-INSERT IGNORE INTO expert_eval_dataset
-    (dataset_name, dataset_version, description, status, create_by, create_time)
-VALUES
-    ('已审核专家基线', 'v1',
-     '基于人工/管理员审核通过的专家档案和有效图谱事实构建的启动基线；正式论文评测应补充独立人工标注。',
-     'ACTIVE', 'system', NOW());
-
-INSERT IGNORE INTO expert_eval_case
-    (dataset_id, user_id, case_name, gold_fields_json, gold_entities_json,
-     gold_relations_json, gold_conflicts_json, notes, create_time)
-SELECT dataset_id,
-       106,
-       '专家106已审核档案基线',
-       JSON_ARRAY(
-           JSON_OBJECT('dbField', 'real_name', 'value', 'expert'),
-           JSON_OBJECT('dbField', 'organization', 'value', '南昌大学'),
-           JSON_OBJECT('dbField', 'professional_title', 'value', '教授'),
-           JSON_OBJECT('dbField', 'research_field', 'value', '软件工程'),
-           JSON_OBJECT('dbField', 'industry_field', 'value', '人工智能'),
-           JSON_OBJECT('dbField', 'service_region', 'value', '江西省')
-       ),
-       JSON_ARRAY(
-           JSON_OBJECT('entityType', 'Expert', 'name', 'expert'),
-           JSON_OBJECT('entityType', 'Organization', 'name', '南昌大学'),
-           JSON_OBJECT('entityType', 'Credential', 'name', '教授'),
-           JSON_OBJECT('entityType', 'Capability', 'name', '软件工程'),
-           JSON_OBJECT('entityType', 'Capability', 'name', '人工智能'),
-           JSON_OBJECT('entityType', 'Capability', 'name', '计算机网络'),
-           JSON_OBJECT('entityType', 'Capability', 'name', '深度学习'),
-           JSON_OBJECT('entityType', 'Industry', 'name', '人工智能'),
-           JSON_OBJECT('entityType', 'ServiceRegion', 'name', '江西省')
-       ),
-       JSON_ARRAY(
-           JSON_OBJECT('sourceType', 'Expert', 'sourceName', 'expert',
-                       'relationType', 'BELONGS_TO',
-                       'targetType', 'Organization', 'targetName', '南昌大学'),
-           JSON_OBJECT('sourceType', 'Expert', 'sourceName', 'expert',
-                       'relationType', 'HAS_CREDENTIAL',
-                       'targetType', 'Credential', 'targetName', '教授'),
-           JSON_OBJECT('sourceType', 'Expert', 'sourceName', 'expert',
-                       'relationType', 'EXPERTISE_IN',
-                       'targetType', 'Capability', 'targetName', '软件工程'),
-           JSON_OBJECT('sourceType', 'Expert', 'sourceName', 'expert',
-                       'relationType', 'EXPERTISE_IN',
-                       'targetType', 'Capability', 'targetName', '人工智能'),
-           JSON_OBJECT('sourceType', 'Expert', 'sourceName', 'expert',
-                       'relationType', 'WORKS_IN_INDUSTRY',
-                       'targetType', 'Industry', 'targetName', '人工智能'),
-           JSON_OBJECT('sourceType', 'Expert', 'sourceName', 'expert',
-                       'relationType', 'SERVES_REGION',
-                       'targetType', 'ServiceRegion', 'targetName', '江西省')
-       ),
-       JSON_ARRAY(),
-       '启动基线来自已审核档案，不能替代独立人工标注集。',
-       NOW()
-FROM expert_eval_dataset
-WHERE dataset_name = '已审核专家基线'
-  AND dataset_version = 'v1';
-
--- ============================================================
 -- Source: expert_profile_dimensions_v2.sql
 -- ============================================================
 -- 科技保险专家30维画像 V2
--- 依据人保专家库立项申请书重构：资格准入、专业技术、重点产业、
--- 保险服务场景、履约交付、历史实绩六组，每组各有明确业务含义。
+-- 依据人保专家库立项申请书重构：资格准入、专业技术、领域迁移、
+-- 保险服务场景、履约交付、历史实绩、利益冲突七组，每组各有明确业务含义。
 -- 执行前会把旧画像和逐材料证据复制到 archive 表，再清理派生画像。
 
 CREATE TABLE IF NOT EXISTS expert_graph_score_archive_v1
@@ -1664,40 +1708,31 @@ VALUES
 ('TECH_EVIDENCE_COLLECTION', 'TECHNICAL', '专业技术能力', '现场取证与证据分析', 1.30, '0', 8, '现场勘查、样品采集、资料核验和证据链构建能力'),
 ('TECH_APPRAISAL_LOSS', 'TECHNICAL', '专业技术能力', '技术鉴定与损失核定', 1.50, '0', 9, '形成技术鉴定意见、损失范围和核定依据的能力'),
 
-('IND_ELECTRONICS', 'INDUSTRY', '重点产业覆盖', '电子信息', 1.00, '0', 10, '服务电子信息、半导体、通信和软件相关产业的能力'),
-('IND_NONFERROUS', 'INDUSTRY', '重点产业覆盖', '有色金属', 1.00, '0', 11, '服务有色金属采选、冶炼、加工及相关装备的能力'),
-('IND_EQUIPMENT', 'INDUSTRY', '重点产业覆盖', '装备制造', 1.00, '0', 12, '服务智能装备、工业制造和自动化系统的能力'),
-('IND_NEW_ENERGY', 'INDUSTRY', '重点产业覆盖', '新能源', 1.00, '0', 13, '服务新能源、储能、电力电子和绿色能源产业的能力'),
-('IND_BIOMED', 'INDUSTRY', '重点产业覆盖', '生物医药', 1.00, '0', 14, '服务生物医药、医疗器械和健康技术产业的能力'),
-('IND_CHEM_MATERIAL', 'INDUSTRY', '重点产业覆盖', '化工与新材料', 1.00, '0', 15, '服务化工中试、新材料研发和工程验证的能力'),
+('ADAPT_DOMAIN_DEPTH', 'ADAPTATION', '领域迁移与知识适配', '专业领域深度', 1.20, '0', 10, '在核心专业方向形成持续积累并具备深入解决专业问题的能力'),
+('ADAPT_CROSS_DOMAIN', 'ADAPTATION', '领域迁移与知识适配', '跨领域迁移', 1.30, '0', 11, '将已有知识和方法迁移到新产业、新技术和新风险场景的能力'),
+('ADAPT_METHOD_REUSE', 'ADAPTATION', '领域迁移与知识适配', '方法工具复用', 1.10, '0', 12, '将检测、仿真、建模、工程分析或评估方法复用于新问题的能力'),
 
-('SCENE_PRE_SURVEY', 'SCENARIO', '保险服务场景', '保前风险勘查', 1.50, '0', 16, '承保前开展技术风险识别、现场勘查和风险建议的能力'),
-('SCENE_RISK_REDUCTION', 'SCENARIO', '保险服务场景', '保中风险减量', 1.40, '0', 17, '承保期间开展隐患治理、风险监测和减量服务的能力'),
-('SCENE_CLAIM_INSPECTION', 'SCENARIO', '保险服务场景', '出险查勘', 1.50, '0', 18, '事故发生后开展现场查勘、事实核验和原因判断的能力'),
-('SCENE_TECH_APPRAISAL', 'SCENARIO', '保险服务场景', '技术鉴定服务', 1.50, '0', 19, '面向保险理赔和争议处理提供独立技术鉴定的能力'),
-('SCENE_TECH_RESCUE', 'SCENARIO', '保险服务场景', '技术救助', 1.30, '0', 20, '为事故处置、止损、恢复和技术救援提供专业支持的能力'),
+('SCENE_PRE_SURVEY', 'SCENARIO', '保险服务场景', '保前风险勘查', 1.50, '0', 13, '承保前开展技术风险识别、现场勘查和风险建议的能力'),
+('SCENE_RISK_REDUCTION', 'SCENARIO', '保险服务场景', '保中风险减量', 1.40, '0', 14, '承保期间开展隐患治理、风险监测和减量服务的能力'),
+('SCENE_CLAIM_INSPECTION', 'SCENARIO', '保险服务场景', '出险查勘', 1.50, '0', 15, '事故发生后开展现场查勘、事实核验和原因判断的能力'),
+('SCENE_TECH_APPRAISAL', 'SCENARIO', '保险服务场景', '技术鉴定服务', 1.50, '0', 16, '面向保险理赔和争议处理提供独立技术鉴定的能力'),
+('SCENE_TECH_RESCUE', 'SCENARIO', '保险服务场景', '技术救助', 1.30, '0', 17, '为事故处置、止损、恢复和技术救援提供专业支持的能力'),
 
-('SERVICE_REGION', 'DELIVERY', '履约交付与合规', '区域覆盖', 1.20, '0', 21, '能够及时到达或远程支持目标服务区域的能力'),
-('SERVICE_RESPONSE', 'DELIVERY', '履约交付与合规', '响应时效', 1.40, '0', 22, '接单确认、到场和成果反馈的及时性'),
-('SERVICE_MODE', 'DELIVERY', '履约交付与合规', '远程与现场适配', 0.90, '0', 23, '按任务要求提供远程研判或现场服务的能力'),
-('SERVICE_COMPLIANCE', 'DELIVERY', '履约交付与合规', '规范与保密合规', 1.50, '0', 24, '遵守服务规范、保密要求、回避规则和证据留存要求'),
-('SERVICE_COST', 'DELIVERY', '履约交付与合规', '费用合理性', 1.10, '0', 25, '服务报价与工作量、专家级别及市场标准相匹配的程度'),
+('SERVICE_REGION', 'DELIVERY', '履约交付与合规', '区域覆盖', 1.20, '0', 18, '能够及时到达或远程支持目标服务区域的能力'),
+('SERVICE_RESPONSE', 'DELIVERY', '履约交付与合规', '响应时效', 1.40, '0', 19, '接单确认、到场和成果反馈的及时性'),
+('SERVICE_MODE', 'DELIVERY', '履约交付与合规', '远程与现场适配', 0.90, '0', 20, '按任务要求提供远程研判或现场服务的能力'),
+('SERVICE_COMPLIANCE', 'DELIVERY', '履约交付与合规', '规范与保密合规', 1.50, '0', 21, '遵守服务规范、保密要求、回避规则和证据留存要求'),
+('SERVICE_COST', 'DELIVERY', '履约交付与合规', '费用合理性', 1.10, '0', 22, '服务报价与工作量、专家级别及市场标准相匹配的程度'),
 
-('PERF_SIMILAR_PROJECT', 'PERFORMANCE', '历史实绩与知识复用', '同类项目经验', 1.50, '0', 26, '完成同类产业、风险类型和服务场景项目的经验'),
-('PERF_REPORT_QUALITY', 'PERFORMANCE', '历史实绩与知识复用', '历史报告质量', 1.50, '0', 27, '技术报告、鉴定意见和风险建议的完整性、规范性与可用性'),
-('PERF_COMPLETION_CREDIT', 'PERFORMANCE', '历史实绩与知识复用', '履约与信用', 1.50, '0', 28, '任务完成率、按期履约、投诉和违规记录的综合表现'),
-('PERF_COLLABORATION', 'PERFORMANCE', '历史实绩与知识复用', '多专家协同', 1.00, '0', 29, '跨单位、跨专业协同和成果汇总能力'),
-('PERF_KNOWLEDGE_REUSE', 'PERFORMANCE', '历史实绩与知识复用', '案例与知识复用', 1.20, '0', 30, '沉淀案例、报告模板、标准、专利或方法并在新任务中复用的能力');
+('PERF_SIMILAR_PROJECT', 'PERFORMANCE', '历史实绩与知识复用', '同类项目经验', 1.50, '0', 23, '完成同类产业、风险类型和服务场景项目的经验'),
+('PERF_REPORT_QUALITY', 'PERFORMANCE', '历史实绩与知识复用', '历史报告质量', 1.50, '0', 24, '技术报告、鉴定意见和风险建议的完整性、规范性与可用性'),
+('PERF_COMPLETION_CREDIT', 'PERFORMANCE', '历史实绩与知识复用', '履约与信用', 1.50, '0', 25, '任务完成率、按期履约、投诉和违规记录的综合表现'),
+('PERF_KNOWLEDGE_REUSE', 'PERFORMANCE', '历史实绩与知识复用', '案例与知识复用', 1.20, '0', 26, '沉淀案例、报告模板、标准、专利或方法并在新任务中复用的能力'),
 
-INSERT IGNORE INTO kg_dimension_capability_map
-    (dimension_code, capability_code, capability_name, ontology_version, create_time)
-SELECT dimension_code,
-       CONCAT('CAP_', dimension_code),
-       dimension_name,
-       'expert-domain-v1',
-       NOW()
-FROM expert_dimension_definition
-WHERE enabled = '0';
+('CONFLICT_DISCLOSURE_COMPLETE', 'CONFLICT', '利益冲突与独立性', '利益关系披露', 1.50, '0', 27, '完整披露本人及近亲属与客户、项目参与方和保险标的之间的利益关系'),
+('CONFLICT_RELATION_TRANSPARENCY', 'CONFLICT', '利益冲突与独立性', '关联关系透明', 1.40, '0', 28, '对任职、兼职、顾问、股权和合作项目等关联关系作出清晰且可核验的说明'),
+('CONFLICT_COMMERCIAL_INDEPENDENCE', 'CONFLICT', '利益冲突与独立性', '商业利益独立', 1.50, '0', 29, '不存在可能影响独立判断的报酬、返佣、推荐收益、股权或其他商业利益'),
+('CONFLICT_RECUSAL_MECHANISM', 'CONFLICT', '利益冲突与独立性', '回避机制执行', 1.40, '0', 30, '能够主动识别潜在利益冲突并执行回避、补充申报和独立判断要求');
 
 UPDATE expert_profile
 SET graph_version = 0,
@@ -1716,8 +1751,12 @@ SET graph_version = 0;
 INSERT IGNORE INTO kg_ontology_version
     (version_code, display_name, resource_path, status, published_at, create_time)
 VALUES
-    ('expert-domain-v2', '科技保险专家领域本体 V2',
-     'classpath:knowledge-graph/ontology-v2.json', 'ACTIVE', NOW(), NOW());
+    ('expert-domain-v3', '科技保险专家检索图谱 V3',
+     'classpath:knowledge-graph/ontology-v3.json', 'ACTIVE', NOW(), NOW());
+
+UPDATE kg_ontology_version
+SET status = 'RETIRED'
+WHERE version_code <> 'expert-domain-v3';
 
 ALTER TABLE expert_graph_score
     ADD COLUMN graph_relation_ids VARCHAR(2000) DEFAULT NULL
@@ -1764,5 +1803,5 @@ WHERE profile_rule_version IS NULL;
 -- SELECT count(*) AS assessment_entities
 -- FROM kg_entity
 -- WHERE entity_type = 'CapabilityAssessment'
---   AND ontology_version = 'expert-domain-v2';
+--   AND ontology_version = 'expert-domain-v3';
 

@@ -6,7 +6,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +27,7 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.expert.domain.ExpertAdminSaveRequest;
 import com.ruoyi.expert.domain.ExpertMaterial;
+import com.ruoyi.expert.domain.ExpertSchedule;
 import com.ruoyi.expert.domain.KnowledgeGraphAgentRunRequest;
 import com.ruoyi.expert.service.ExpertAdminService;
 import com.ruoyi.expert.service.ExpertObjectStorage;
@@ -33,7 +37,7 @@ import com.ruoyi.expert.service.KnowledgeGraphProjectionService;
 import com.ruoyi.expert.service.KnowledgeGraphQueryService;
 import com.ruoyi.expert.service.KnowledgeGraphOutboxWorker;
 import com.ruoyi.expert.service.KnowledgeGraphRebuildService;
-import com.ruoyi.expert.service.ExpertQualityEvaluationService;
+import com.ruoyi.expert.service.ExpertProfileWordImportService;
 
 /**
  * 管理控制台业务摘要。
@@ -70,7 +74,7 @@ public class ExpertAdminController extends BaseController
     private KnowledgeGraphRebuildService graphRebuildService;
 
     @Autowired
-    private ExpertQualityEvaluationService qualityEvaluationService;
+    private ExpertProfileWordImportService profileWordImportService;
 
     @PreAuthorize("@ss.hasPermi('expert:admin:view')")
     @GetMapping("/summary")
@@ -117,10 +121,62 @@ public class ExpertAdminController extends BaseController
     }
 
     @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
+    @GetMapping("/experts/profile-import-template")
+    public ResponseEntity<byte[]> downloadProfileImportTemplate()
+    {
+        return ExpertWorkspaceController.wordTemplateResponse(
+                profileWordImportService.createTemplate());
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
+    @PostMapping(value = "/experts/profile-import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public AjaxResult importProfile(@RequestParam("file") MultipartFile file)
+    {
+        return success(profileWordImportService.importProfile(file));
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
     @GetMapping("/experts/{userId}/certifications")
     public AjaxResult certifications(@PathVariable Long userId)
     {
         return success(adminService.certifications(userId));
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
+    @GetMapping("/experts/{userId}/schedules")
+    public AjaxResult schedules(@PathVariable Long userId)
+    {
+        return success(adminService.schedules(userId));
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
+    @PutMapping("/experts/{userId}/schedules")
+    public AjaxResult saveSchedules(@PathVariable Long userId,
+            @RequestBody List<ExpertSchedule> schedules)
+    {
+        adminService.saveSchedules(userId, schedules, getUsername());
+        return success();
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
+    @GetMapping("/experts/{userId}/unavailable-periods")
+    public AjaxResult unavailablePeriods(@PathVariable Long userId)
+    {
+        return success(adminService.unavailablePeriods(userId));
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:list')")
+    @GetMapping("/experts/{userId}/profile-versions")
+    public AjaxResult profileVersions(@PathVariable Long userId)
+    {
+        return success(adminService.profileVersions(userId));
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:expert:list')")
+    @GetMapping("/experts/{userId}/profile-versions/{releaseId}")
+    public AjaxResult profileVersion(@PathVariable Long userId, @PathVariable Long releaseId)
+    {
+        return success(adminService.profileVersion(userId, releaseId));
     }
 
     @PreAuthorize("@ss.hasPermi('expert:admin:expert:list')")
@@ -135,6 +191,15 @@ public class ExpertAdminController extends BaseController
     public AjaxResult knowledgeGraphOntology()
     {
         return success(graphQueryService.ontology());
+    }
+
+    @PreAuthorize("@ss.hasPermi('expert:admin:view')")
+    @GetMapping("/knowledge-graph/overview")
+    public AjaxResult knowledgeGraphOverview(
+            @RequestParam(defaultValue = "400") int entityLimit,
+            @RequestParam(defaultValue = "800") int relationLimit)
+    {
+        return success(graphQueryService.overviewSubgraph(entityLimit, relationLimit));
     }
 
     @PreAuthorize("@ss.hasPermi('expert:admin:view')")
@@ -187,27 +252,6 @@ public class ExpertAdminController extends BaseController
     public AjaxResult knowledgeGraphAgentRun(@PathVariable String runId)
     {
         return success(graphAgentRuntimeService.getRun(runId));
-    }
-
-    @PreAuthorize("@ss.hasPermi('expert:admin:view')")
-    @GetMapping("/evaluation/datasets")
-    public AjaxResult evaluationDatasets()
-    {
-        return success(qualityEvaluationService.datasets());
-    }
-
-    @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")
-    @PostMapping("/evaluation/datasets/{datasetId}/run")
-    public AjaxResult runQualityEvaluation(@PathVariable Long datasetId)
-    {
-        return success(qualityEvaluationService.run(datasetId, getUsername()));
-    }
-
-    @PreAuthorize("@ss.hasPermi('expert:admin:view')")
-    @GetMapping("/evaluation/runs/{runId}")
-    public AjaxResult qualityEvaluationRun(@PathVariable Long runId)
-    {
-        return success(qualityEvaluationService.getRun(runId));
     }
 
     @PreAuthorize("@ss.hasPermi('expert:admin:expert:edit')")

@@ -61,6 +61,28 @@ class ExpertAgentAnalysisValidatorTest
     }
 
     @Test
+    void rejectsAbsenceAndSpeculationAsScoringEvidence()
+    {
+        String payload = """
+                {
+                  "fields": [],
+                  "issues": [],
+                  "scores": {
+                    "SCENE_CLAIM_INSPECTION": {
+                      "score": 60,
+                      "confidence": 0.5,
+                      "evidence": "文档未提及出险查勘，但作为教授可能具备相关能力"
+                    }
+                  }
+                }
+                """;
+
+        assertThrows(IllegalArgumentException.class, () ->
+                ExpertAgentAnalysisValidator.validate(
+                        JSON.parseObject(payload), Set.of("SCENE_CLAIM_INSPECTION")));
+    }
+
+    @Test
     void rejectsUnknownDimensionAndMissingRootSection()
     {
         String unknownDimension = """

@@ -18,7 +18,6 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.ruoyi.common.exception.ServiceException;
 import com.ruoyi.common.utils.StringUtils;
-import com.ruoyi.expert.domain.ExpertGraphDimension;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
 import com.ruoyi.expert.mapper.KnowledgeGraphMapper;
 
@@ -31,6 +30,8 @@ public class KnowledgeGraphFactPersistenceService
     private static final Set<String> MATERIAL_ENTITY_TYPES = Set.of(
             "Organization", "Credential", "Capability", "Industry", "Project",
             "Achievement", "Technology", "ServiceRegion");
+    private static final int MATERIAL_ENTITY_LIMIT = 12;
+    private static final int MATERIAL_RELATION_LIMIT = 12;
 
     @Autowired
     private KnowledgeGraphMapper graphMapper;
@@ -55,6 +56,8 @@ public class KnowledgeGraphFactPersistenceService
         {
             return summary;
         }
+        graphMapper.deleteMaterialGraphEvidence(materialId);
+        graphMapper.deleteOrphanMaterialRelations();
         Map<String, Object> expert = graphMapper.selectExpertEntity(userId);
         if (expert == null)
         {
@@ -69,136 +72,41 @@ public class KnowledgeGraphFactPersistenceService
         String expertName = String.valueOf(expert.get("canonicalName"));
         Map<String, Long> entityIds = new HashMap<>();
         entityIds.put("Expert|" + normalize(expertName), expertId);
+        Set<String> reservedCapabilityNames =
+                platformMapper.selectGraphDimensions(userId, "DRAFT").stream()
+                        .flatMap(item -> java.util.stream.Stream.of(
+                                normalize(item.getDimensionName()),
+                                normalize(item.getDimensionCode())))
+                        .collect(java.util.stream.Collectors.toSet());
 
         JSONArray entities = facts.getJSONArray("entities");
         String reviewStatus = accepted ? "ACCEPTED" : "PENDING";
         int entityCount = persistEntities(entities, materialId, sourceKind,
-                reviewStatus, entityIds);
+                reviewStatus, entityIds, reservedCapabilityNames);
         int relationCount = persistRelations(facts.getJSONArray("relations"), expertId,
-                materialId, sourceKind, reviewStatus, entityIds);
+                materialId, sourceKind, reviewStatus, entityIds,
+                reservedCapabilityNames, expertName);
         summary.put("entityCount", entityCount);
         summary.put("relationCount", relationCount);
         return summary;
     }
 
-    /**
-     * 将模型给出的维度评分声明保存为图谱事实。
-     *
-     * <p>每条声明独立对应材料、评估实体和证据，画像聚合只读取这些图谱事实。
-     * 不直接在聚合服务中消费模型响应，避免画像和图谱形成两套平行数据源。</p>
-     */
-    @Transactional
-    public Map<String, Object> persistDimensionAssessments(Long userId, Long materialId,
-            JSONObject analysis, boolean accepted)
-    {
-        Map<String, Object> summary = new HashMap<>();
-        summary.put("assessmentCount", 0);
-        summary.put("capabilityLinkCount", 0);
-        JSONObject scores = analysis == null ? null : analysis.getJSONObject("scores");
-        if (scores == null || scores.isEmpty())
-        {
-            return summary;
-        }
-        Map<String, Object> expert = graphMapper.selectExpertEntity(userId);
-        if (expert == null)
-        {
-            projectionService.projectExpert(userId);
-            expert = graphMapper.selectExpertEntity(userId);
-        }
-        if (expert == null)
-        {
-            throw new ServiceException("专家投影失败，不能写入画像图谱声明");
-        }
-
-        graphMapper.deleteMaterialAssessments(materialId);
-        graphMapper.deleteMaterialAssessmentRelations(materialId);
-        graphMapper.deleteMaterialAssessmentEntities(materialId);
-
-        String reviewStatus = accepted ? "ACCEPTED" : "PENDING";
-        Long expertId = numberValue(expert.get("entityId"));
-        Map<String, String> capabilityNames = new HashMap<>();
-        for (Map<String, Object> mapping : graphMapper.selectCapabilityMappings())
-        {
-            capabilityNames.put(String.valueOf(mapping.get("dimensionCode")),
-                    String.valueOf(mapping.get("capabilityName")));
-        }
-        Map<String, String> dimensionNames = new HashMap<>();
-        for (ExpertGraphDimension dimension :
-                platformMapper.selectGraphDimensions(userId, "DRAFT"))
-        {
-            dimensionNames.put(dimension.getDimensionCode(), dimension.getDimensionName());
-        }
-
-        int assessmentCount = 0;
-        int capabilityLinkCount = 0;
-        for (Map.Entry<String, Object> entry : scores.entrySet())
-        {
-            String dimensionCode = entry.getKey();
-            if (!(entry.getValue() instanceof JSONObject score))
-            {
-                continue;
-            }
-            Object scoreValue = score.get("score");
-            Object confidenceValue = score.get("confidence");
-            String evidence = score.getString("evidence");
-            if (!(scoreValue instanceof Number) || !(confidenceValue instanceof Number)
-                    || StringUtils.isEmpty(evidence))
-            {
-                continue;
-            }
-            double scoreNumber = clamp(((Number) scoreValue).doubleValue(), 0, 100);
-            double confidence = clamp(((Number) confidenceValue).doubleValue(), 0, 1);
-            String dimensionName = dimensionNames.getOrDefault(dimensionCode, dimensionCode);
-            String capabilityName = capabilityNames.getOrDefault(dimensionCode, dimensionName);
-
-            Map<String, Object> capabilityProperties = new LinkedHashMap<>();
-            capabilityProperties.put("name", capabilityName);
-            capabilityProperties.put("dimensionCode", dimensionCode);
-            Long capabilityId = upsertEntity("Capability",
-                    "capability:" + sha256(normalize(capabilityName)),
-                    capabilityName, capabilityProperties, reviewStatus);
-
-            Map<String, Object> assessmentProperties = new LinkedHashMap<>();
-            assessmentProperties.put("dimensionCode", dimensionCode);
-            assessmentProperties.put("dimensionName", dimensionName);
-            assessmentProperties.put("materialId", materialId);
-            assessmentProperties.put("score", scoreNumber);
-            assessmentProperties.put("confidence", confidence);
-            assessmentProperties.put("ruleVersion", "graph-profile-v1");
-            Long assessmentId = upsertEntity("CapabilityAssessment",
-                    "assessment:" + materialId + ":" + dimensionCode,
-                    dimensionName + "·材料" + materialId,
-                    assessmentProperties, reviewStatus);
-
-            linkAssessment(expertId, "Expert", "ASSESSED_AS",
-                    "CapabilityAssessment", assessmentId, reviewStatus,
-                    scoreNumber, confidence, materialId,
-                    "material:" + materialId + ":dimension:" + dimensionCode,
-                    evidence, assessmentId);
-            linkAssessment(assessmentId, "CapabilityAssessment", "ASSESSES_CAPABILITY",
-                    "Capability", capabilityId, reviewStatus,
-                    scoreNumber, confidence, materialId,
-                    "material:" + materialId + ":dimension:" + dimensionCode,
-                    "维度“" + dimensionName + "”映射到能力“" + capabilityName + "”",
-                    capabilityId);
-            assessmentCount++;
-            capabilityLinkCount++;
-        }
-        summary.put("assessmentCount", assessmentCount);
-        summary.put("capabilityLinkCount", capabilityLinkCount);
-        return summary;
-    }
-
     private int persistEntities(JSONArray entities, Long materialId, String sourceKind,
-            String reviewStatus, Map<String, Long> entityIds)
+            String reviewStatus, Map<String, Long> entityIds,
+            Set<String> reservedCapabilityNames)
     {
         if (entities == null)
         {
             return 0;
         }
         int count = 0;
+        Map<String, Integer> typeCounts = new HashMap<>();
         for (int index = 0; index < entities.size(); index++)
         {
+            if (count >= MATERIAL_ENTITY_LIMIT)
+            {
+                break;
+            }
             JSONObject entity = entities.getJSONObject(index);
             if (entity == null || !MATERIAL_ENTITY_TYPES.contains(entity.getString("entityType")))
             {
@@ -206,7 +114,12 @@ public class KnowledgeGraphFactPersistenceService
             }
             String entityType = entity.getString("entityType");
             String name = safeName(entity.getString("name"));
-            if (name == null)
+            if (name == null || reservedCapability(entityType, name, reservedCapabilityNames))
+            {
+                continue;
+            }
+            int typeCount = typeCounts.getOrDefault(entityType, 0);
+            if (typeCount >= entityLimit(entityType))
             {
                 continue;
             }
@@ -218,48 +131,10 @@ public class KnowledgeGraphFactPersistenceService
                     properties, reviewStatus);
             entityIds.put(entityType + "|" + normalize(name), entityId);
             persistEntityEvidence(entityId, materialId, sourceKind, entity);
+            typeCounts.put(entityType, typeCount + 1);
             count++;
         }
         return count;
-    }
-
-    private void linkAssessment(Long sourceId, String sourceType, String relationType,
-            String targetType, Long targetId, String reviewStatus, double score,
-            double confidence, Long materialId, String sourceRef, String excerpt,
-            Long evidenceEntityId)
-    {
-        ontologyService.requireRelationType(relationType, sourceType, targetType);
-        Map<String, Object> relationRow = new LinkedHashMap<>();
-        relationRow.put("sourceEntityId", sourceId);
-        relationRow.put("relationType", relationType);
-        relationRow.put("targetEntityId", targetId);
-        relationRow.put("confidence", confidence);
-        relationRow.put("reviewStatus", reviewStatus);
-        relationRow.put("ontologyVersion", KnowledgeGraphOntologyService.ONTOLOGY_VERSION);
-        relationRow.put("sourceKind", "GRAPH_PROFILE");
-        relationRow.put("propertiesJson", JSON.toJSONString(Map.of(
-                "score", score,
-                "materialId", materialId,
-                "ruleVersion", "graph-profile-v1")));
-        graphMapper.upsertRelation(relationRow);
-        Long relationId = graphMapper.selectRelationId(sourceId, relationType, targetId);
-
-        Map<String, Object> evidenceRow = new LinkedHashMap<>();
-        evidenceRow.put("evidenceKey", sha256(String.join("|",
-                String.valueOf(relationId), "GRAPH_PROFILE", sourceRef)));
-        evidenceRow.put("relationId", relationId);
-        evidenceRow.put("entityId", evidenceEntityId);
-        evidenceRow.put("sourceType", "MATERIAL");
-        evidenceRow.put("sourceRef", sourceRef);
-        evidenceRow.put("materialId", materialId);
-        evidenceRow.put("pageNo", 1);
-        evidenceRow.put("charStart", null);
-        evidenceRow.put("charEnd", null);
-        evidenceRow.put("quoteHash", sha256(excerpt));
-        evidenceRow.put("excerpt", abbreviate(excerpt, 800));
-        evidenceRow.put("confidence", confidence);
-        evidenceRow.put("extractorVersion", "graph-profile-v1");
-        graphMapper.upsertEvidence(evidenceRow);
     }
 
     private void persistEntityEvidence(Long entityId, Long materialId, String sourceKind,
@@ -286,7 +161,8 @@ public class KnowledgeGraphFactPersistenceService
 
     private int persistRelations(JSONArray relations, Long expertId,
             Long materialId, String sourceKind, String reviewStatus,
-            Map<String, Long> entityIds)
+            Map<String, Long> entityIds, Set<String> reservedCapabilityNames,
+            String expertName)
     {
         if (relations == null)
         {
@@ -305,8 +181,25 @@ public class KnowledgeGraphFactPersistenceService
             String relationType = relation.getString("relationType");
             String sourceName = safeName(relation.getString("sourceName"));
             String targetName = safeName(relation.getString("targetName"));
+            if ("Expert".equals(sourceType) && "Industry".equals(targetType)
+                    && ("WORKS_IN_INDUSTRY".equals(relationType)
+                        || "HAS_EXPERT".equals(relationType)))
+            {
+                String industryName = targetName;
+                sourceType = "Industry";
+                sourceName = industryName;
+                targetType = "Expert";
+                targetName = expertName;
+                relationType = "HAS_EXPERT";
+            }
+            if (reservedCapability(sourceType, sourceName, reservedCapabilityNames)
+                    || reservedCapability(targetType, targetName, reservedCapabilityNames))
+            {
+                continue;
+            }
             if ((!MATERIAL_ENTITY_TYPES.contains(sourceType) && !"Expert".equals(sourceType))
-                    || !MATERIAL_ENTITY_TYPES.contains(targetType)
+                    || (!MATERIAL_ENTITY_TYPES.contains(targetType)
+                        && !"Expert".equals(targetType))
                     || StringUtils.isEmpty(relationType)
                     || sourceName == null || targetName == null)
             {
@@ -321,10 +214,10 @@ public class KnowledgeGraphFactPersistenceService
                 // 单条关系方向不合法时忽略该关系，不丢弃同批其他有效事实和画像。
                 continue;
             }
-            Long sourceId = resolveEntityId(sourceType, sourceName, materialId,
-                    sourceKind, reviewStatus, entityIds, expertId);
-            Long targetId = resolveEntityId(targetType, targetName, materialId,
-                    sourceKind, reviewStatus, entityIds, expertId);
+            Long sourceId = resolveEntityId(sourceType, sourceName, entityIds,
+                    expertId, reservedCapabilityNames);
+            Long targetId = resolveEntityId(targetType, targetName, entityIds,
+                    expertId, reservedCapabilityNames);
             if (sourceId == null || targetId == null || sourceId.equals(targetId))
             {
                 continue;
@@ -363,36 +256,46 @@ public class KnowledgeGraphFactPersistenceService
             evidenceRow.put("extractorVersion", sourceKind + "-graph-v1");
             graphMapper.upsertEvidence(evidenceRow);
             count++;
+            if (count >= MATERIAL_RELATION_LIMIT)
+            {
+                break;
+            }
         }
         return count;
     }
 
-    private Long resolveEntityId(String entityType, String name, Long materialId,
-            String sourceKind, String reviewStatus, Map<String, Long> entityIds,
-            Long expertId)
+    private Long resolveEntityId(String entityType, String name,
+            Map<String, Long> entityIds, Long expertId,
+            Set<String> reservedCapabilityNames)
     {
         if ("Expert".equals(entityType))
         {
             return expertId;
         }
-        if (!MATERIAL_ENTITY_TYPES.contains(entityType))
+        if (!MATERIAL_ENTITY_TYPES.contains(entityType)
+                || reservedCapability(entityType, name, reservedCapabilityNames))
         {
             return null;
         }
         String key = entityType + "|" + normalize(name);
-        Long existing = entityIds.get(key);
-        if (existing != null)
+        return entityIds.get(key);
+    }
+
+    private static boolean reservedCapability(String entityType, String name,
+            Set<String> reservedCapabilityNames)
+    {
+        return "Capability".equals(entityType) && name != null
+                && reservedCapabilityNames.contains(normalize(name));
+    }
+
+    private static int entityLimit(String entityType)
+    {
+        return switch (entityType)
         {
-            return existing;
-        }
-        Map<String, Object> properties = new LinkedHashMap<>();
-        properties.put("name", name);
-        properties.put("materialId", materialId);
-        properties.put("extractionSource", sourceKind);
-        Long entityId = upsertEntity(entityType, entityKey(entityType, name),
-                name, properties, reviewStatus);
-        entityIds.put(key, entityId);
-        return entityId;
+            case "Project" -> 3;
+            case "Achievement", "Technology", "Capability" -> 2;
+            default -> 1;
+        };
     }
 
     private Long upsertEntity(String entityType, String externalKey, String name,

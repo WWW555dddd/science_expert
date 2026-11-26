@@ -38,6 +38,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.ruoyi.expert.config.ExpertOcrProperties;
 import com.ruoyi.expert.domain.ExpertMaterial;
+import com.ruoyi.expert.domain.ExpertMaterialFile;
 import com.ruoyi.expert.domain.ExpertProfile;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
 
@@ -45,7 +46,7 @@ import com.ruoyi.expert.mapper.ExpertPlatformMapper;
  * 资料入库与模型辅助预审适配层。
  *
  * 使用 Redis List 作为消息队列，优先调用远程 DeepSeek 模型，
- * 远程服务不可用时降级到本地字段提取。证据不足时不生成画像分数。
+ * 远程服务不可用时降级到本地基本信息提取。证据不足时不生成画像分数。
  */
 @Service
 public class ExpertIngestService
@@ -189,7 +190,7 @@ public class ExpertIngestService
                     deepSeekAgent.isConfigured() ? "正在调用DeepSeek分析文件" : "远程模型未配置，使用本地规则提取");
             update(materialId, processingToken, "MASKING", processingReviewStatus, 0, 0,
                     "正在执行敏感信息脱敏");
-            String documentText = readDocumentText(material);
+            String documentText = readMaterialDocumentText(material);
             boolean documentTextEmpty = StringUtils.isEmpty(documentText);
             JSONObject remoteAnalysis = null;
             String remoteError = null;
@@ -238,7 +239,7 @@ public class ExpertIngestService
             issueCount += issue(issues, StringUtils.isEmpty(profile.getEmail()), "缺少电子邮箱");
             update(materialId, processingToken, "MAPPING", processingReviewStatus, mappingCount,
                     issueCount,
-                    "已生成 " + mappingCount + " 个字段映射");
+                    "已生成 " + mappingCount + " 条基本信息提取结果");
             update(materialId, processingToken, "PRE_REVIEWING", processingReviewStatus,
                     mappingCount, issueCount,
                     "正在校验缺项、冲突和材料完整性");
@@ -406,7 +407,36 @@ public class ExpertIngestService
     }
 
     /**
-     * 读取材料正文：DOCX/文本直接读取，PDF优先提取文本，扫描PDF和图片调用OCR。
+     * 读取同一材料版本内全部文件正文。
+     */
+    private String readMaterialDocumentText(ExpertMaterial material)
+    {
+        List<ExpertMaterialFile> files = platformMapper.selectMaterialFiles(material.getMaterialId());
+        if (files.isEmpty())
+        {
+            return readDocumentText(material);
+        }
+        StringBuilder combined = new StringBuilder();
+        for (ExpertMaterialFile file : files)
+        {
+            ExpertMaterial fileMaterial = new ExpertMaterial();
+            fileMaterial.setMaterialId(material.getMaterialId());
+            fileMaterial.setMaterialCategory(material.getMaterialCategory());
+            fileMaterial.setFileName(file.getFileName());
+            fileMaterial.setFilePath(file.getFilePath());
+            fileMaterial.setFileType(file.getFileType());
+            String text = readDocumentText(fileMaterial);
+            if (StringUtils.isNotEmpty(text))
+            {
+                combined.append("【文件：").append(file.getFileName()).append("】\n")
+                        .append(text).append("\n\n");
+            }
+        }
+        return limitText(combined.toString());
+    }
+
+    /**
+     * 读取单个文件正文：DOCX/文本直接读取，PDF优先提取文本，扫描PDF和图片调用OCR。
      */
     private String readDocumentText(ExpertMaterial material)
     {
@@ -569,7 +599,7 @@ public class ExpertIngestService
 
     private static String evidence(String text)
     {
-        return StringUtils.isEmpty(text) ? "专家档案表单（材料无可解析正文）" : "上传文档正文字段提取";
+        return StringUtils.isEmpty(text) ? "专家档案表单（材料无可解析正文）" : "上传文档正文基本信息提取";
     }
 
     private static boolean isAllowedField(String dbField)

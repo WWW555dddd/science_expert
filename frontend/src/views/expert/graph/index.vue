@@ -4,7 +4,7 @@
       <div>
         <span class="eyebrow">PROFILE SNAPSHOT</span>
         <h2>专家能力画像</h2>
-        <p>系统基于已审核知识图谱派生能力维度。每个分数均可回溯到图谱关系、材料证据和画像规则版本。</p>
+        <p>系统基于已审核认证材料独立派生30维画像。每个分数均可回溯到材料证据和画像规则版本。</p>
       </div>
       <div class="graph-meta">
         <el-tag :type="graphTagType" effect="dark">
@@ -50,8 +50,7 @@
           />
           <small v-if="dimension.dataStatus !== 'INSUFFICIENT_EVIDENCE'">
             置信度 {{ Math.round(Number(dimension.confidence || 0) * 100) }}%
-            · {{ dimension.sourceCount || 0 }} 份证据
-            · {{ dimension.graphPathCount || 0 }} 条图谱路径
+            · {{ dimension.sourceCount || 0 }} 份材料证据
           </small>
           <small v-else>不生成占位分</small>
         </div>
@@ -80,8 +79,8 @@ const graphStatusText = computed(() => ({
 })[graph.value.status] || "暂无画像")
 const profileKindLabel = computed(() => ({
   LEGACY_PROFILE: "旧版评分画像",
-  EVIDENCE_SCORE: "证据评分画像",
-  GRAPH_PROFILE: "知识图谱驱动画像",
+  EVIDENCE_SCORE: "独立30维画像",
+  GRAPH_PROFILE: "历史知识图谱画像",
   MIXED: "混合来源画像"
 })[graph.value.profileKind] || "")
 const averageScore = computed(() => {
@@ -125,13 +124,16 @@ function scoreColor(score) {
 }
 
 function dimensionTooltip(dimension) {
+  const definition = dimension.description
+    ? `维度说明：${dimension.description}\n`
+    : ""
   if (dimension.evidenceItems?.length) {
-    return dimension.evidenceItems
+    return definition + dimension.evidenceItems
       .slice(0, 3)
       .map(item => `材料#${item.materialId}：${item.evidence}`)
       .join("\n")
   }
-  return dimension.evidence || "暂无可追溯证据"
+  return definition + (dimension.evidence || "暂无可追溯证据")
 }
 
 function loadGraph() {

@@ -17,8 +17,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.ruoyi.expert.domain.ExpertGraphDimension;
 import com.ruoyi.expert.domain.ExpertProfile;
 import com.ruoyi.expert.domain.ExpertSchedule;
+import com.ruoyi.expert.domain.ExpertUnavailablePeriod;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
 
 @ExtendWith(MockitoExtension.class)
@@ -61,7 +63,7 @@ class KnowledgeGraphAgentToolsTest
         profile.setServiceStatus("AVAILABLE");
         when(platformMapper.selectProfileByUserId(12L)).thenReturn(profile);
         when(platformMapper.selectScheduleByUserId(12L)).thenReturn(List.of());
-        when(dimensionViewService.dimensions(12L, "APPROVED")).thenReturn(List.of());
+        when(dimensionViewService.dimensions(12L, "DRAFT")).thenReturn(List.of());
 
         JSONObject arguments = new JSONObject();
         arguments.put("expertExternalKey", "expert:12");
@@ -89,7 +91,7 @@ class KnowledgeGraphAgentToolsTest
         schedule.setEffectiveFrom("2026-11-01");
         when(platformMapper.selectProfileByUserId(21L)).thenReturn(profile);
         when(platformMapper.selectScheduleByUserId(21L)).thenReturn(List.of(schedule));
-        when(dimensionViewService.dimensions(21L, "APPROVED")).thenReturn(List.of());
+        when(dimensionViewService.dimensions(21L, "DRAFT")).thenReturn(List.of());
 
         JSONObject arguments = new JSONObject();
         arguments.put("expertExternalKey", "expert:21");
@@ -106,6 +108,35 @@ class KnowledgeGraphAgentToolsTest
     }
 
     @Test
+    void temporaryUnavailablePeriodBlocksDateCandidate()
+    {
+        ExpertProfile profile = availableProfile(23L);
+        ExpertSchedule schedule = new ExpertSchedule();
+        schedule.setWeekday(5);
+        schedule.setServiceMode("BOTH");
+        schedule.setWeeklyCapacity(2);
+        ExpertUnavailablePeriod unavailable = new ExpertUnavailablePeriod();
+        unavailable.setStartTime("2026-11-20 09:00:00");
+        unavailable.setEndTime("2026-11-20 15:00:00");
+        when(platformMapper.selectProfileByUserId(23L)).thenReturn(profile);
+        when(platformMapper.selectScheduleByUserId(23L)).thenReturn(List.of(schedule));
+        when(platformMapper.selectUnavailablePeriodsByUserId(23L))
+                .thenReturn(List.of(unavailable));
+        when(dimensionViewService.dimensions(23L, "DRAFT")).thenReturn(List.of());
+        JSONObject arguments = new JSONObject();
+        arguments.put("expertExternalKey", "expert:23");
+        arguments.put("serviceDate", "2026-11-20");
+
+        JSONObject result = tools.execute("expert_check_availability", arguments);
+
+        assertTrue(!result.getBooleanValue("hardGateEligible"));
+        assertTrue(result.getBooleanValue("temporarilyUnavailable"));
+        assertTrue(result.getJSONArray("gateChecks").toJavaList(JSONObject.class).stream()
+                .anyMatch(item -> "TEMPORARY_UNAVAILABILITY".equals(item.getString("code"))
+                        && !item.getBooleanValue("passed")));
+    }
+
+    @Test
     void batchFilterRemovesUnavailableCandidates()
     {
         ExpertProfile available = availableProfile(31L);
@@ -119,8 +150,8 @@ class KnowledgeGraphAgentToolsTest
         when(platformMapper.selectProfileByUserId(32L)).thenReturn(paused);
         when(platformMapper.selectScheduleByUserId(31L)).thenReturn(List.of(schedule));
         when(platformMapper.selectScheduleByUserId(32L)).thenReturn(List.of(schedule));
-        when(dimensionViewService.dimensions(31L, "APPROVED")).thenReturn(List.of());
-        when(dimensionViewService.dimensions(32L, "APPROVED")).thenReturn(List.of());
+        when(dimensionViewService.dimensions(31L, "DRAFT")).thenReturn(List.of());
+        when(dimensionViewService.dimensions(32L, "DRAFT")).thenReturn(List.of());
         JSONObject arguments = new JSONObject();
         arguments.put("expertExternalKeys", List.of("expert:31", "expert:32"));
         arguments.put("matchCounts", List.of(4, 5));
@@ -132,6 +163,34 @@ class KnowledgeGraphAgentToolsTest
         assertEquals(1, result.getIntValue("eligibleCount"));
         assertEquals("expert:31", result.getJSONArray("candidates")
                 .getJSONObject(0).getString("expertExternalKey"));
+    }
+
+    @Test
+    void ranksUsingProfileDimensionsRelevantToTheTask()
+    {
+        ExpertProfile profile = availableProfile(41L);
+        ExpertSchedule schedule = new ExpertSchedule();
+        schedule.setWeekday(5);
+        schedule.setServiceMode("BOTH");
+        schedule.setWeeklyCapacity(2);
+        when(platformMapper.selectProfileByUserId(41L)).thenReturn(profile);
+        when(platformMapper.selectScheduleByUserId(41L)).thenReturn(List.of(schedule));
+        ExpertGraphDimension risk = dimension("TECH_RISK_IDENT", "风险识别", 92, 0.9);
+        ExpertGraphDimension fee = dimension("SERVICE_COST", "费用合理性", 40, 0.5);
+        when(dimensionViewService.dimensions(41L, "DRAFT"))
+                .thenReturn(List.of(risk, fee));
+        JSONObject arguments = new JSONObject();
+        arguments.put("expertExternalKey", "expert:41");
+        arguments.put("serviceDate", "2026-11-20");
+        arguments.put("matchCount", 2);
+        arguments.put("profileTerms", List.of("风险识别"));
+
+        JSONObject result = tools.execute("expert_check_availability", arguments);
+
+        assertEquals("MATCHED_DIMENSIONS", result.getString("profileScoreScope"));
+        assertEquals(92.0, result.getDoubleValue("profileScore"));
+        assertEquals("TECH_RISK_IDENT", result.getJSONArray("profileDimensionMatches")
+                .getJSONObject(0).getString("dimensionCode"));
     }
 
     @Test
@@ -166,8 +225,10 @@ class KnowledgeGraphAgentToolsTest
         ArgumentCaptor<String> statement = ArgumentCaptor.forClass(String.class);
         verify(neo4j).query(statement.capture(), anyMap());
         assertTrue(statement.getValue().contains("r.ownerExpertId ="));
-        assertTrue(statement.getValue().contains("split(e.externalKey, ':')[1]"));
-        assertTrue(statement.getValue().contains("node.entityType <> 'Expert'"));
+        assertTrue(statement.getValue().contains("split(expert.externalKey, ':')[1]"));
+        assertTrue(statement.getValue().contains(
+                "(industry:KGNode {entityType: 'Industry'})"));
+        assertTrue(statement.getValue().contains("ir.relationType = 'HAS_EXPERT'"));
     }
 
     private static ExpertProfile availableProfile(Long userId)
@@ -177,5 +238,18 @@ class KnowledgeGraphAgentToolsTest
         profile.setReviewStatus("APPROVED");
         profile.setServiceStatus("AVAILABLE");
         return profile;
+    }
+
+    private static ExpertGraphDimension dimension(String code, String name,
+            double score, double confidence)
+    {
+        ExpertGraphDimension dimension = new ExpertGraphDimension();
+        dimension.setDimensionCode(code);
+        dimension.setDimensionName(name);
+        dimension.setDescription(name);
+        dimension.setScore(java.math.BigDecimal.valueOf(score));
+        dimension.setConfidence(java.math.BigDecimal.valueOf(confidence));
+        dimension.setDataStatus("AVAILABLE");
+        return dimension;
     }
 }

@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.time.LocalDate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,7 +17,10 @@ import com.ruoyi.common.utils.StringUtils;
 import com.ruoyi.expert.domain.ExpertAdminSaveRequest;
 import com.ruoyi.expert.domain.ExpertGraphDimension;
 import com.ruoyi.expert.domain.ExpertMaterial;
+import com.ruoyi.expert.domain.ExpertMaterialFile;
 import com.ruoyi.expert.domain.ExpertProfile;
+import com.ruoyi.expert.domain.ExpertSchedule;
+import com.ruoyi.expert.domain.ExpertUnavailablePeriod;
 import com.ruoyi.expert.mapper.ExpertPlatformMapper;
 import com.ruoyi.expert.mapper.KnowledgeGraphMapper;
 
@@ -27,7 +31,8 @@ import com.ruoyi.expert.mapper.KnowledgeGraphMapper;
 public class ExpertAdminService
 {
     private static final Set<String> SERVICE_STATUSES =
-            Set.of("AVAILABLE", "PAUSED", "PENDING_CERTIFICATION", "EXITED");
+            Set.of("AVAILABLE", "PAUSED", "PENDING_CERTIFICATION",
+                    "CREDIT_BLOCKED", "EXITED");
 
     @Autowired
     private ExpertPlatformMapper platformMapper;
@@ -37,6 +42,9 @@ public class ExpertAdminService
 
     @Autowired
     private ExpertCertificationService certificationService;
+
+    @Autowired
+    private ExpertCreditService creditService;
 
     @Autowired
     private ExpertIngestService ingestService;
@@ -55,6 +63,9 @@ public class ExpertAdminService
 
     @Autowired
     private ExpertDimensionViewService dimensionViewService;
+
+    @Autowired
+    private ExpertVersionService versionService;
 
     public List<Map<String, Object>> list(Map<String, Object> query)
     {
@@ -80,6 +91,36 @@ public class ExpertAdminService
         return certificationService.status(userId);
     }
 
+    public List<ExpertSchedule> schedules(Long userId)
+    {
+        ensureExpertUser(userId);
+        return platformMapper.selectScheduleByUserId(userId);
+    }
+
+    public void saveSchedules(Long userId, List<ExpertSchedule> schedules, String operatorName)
+    {
+        ensureExpertUser(userId);
+        workspaceService.saveSchedules(schedules, userId, operatorName);
+    }
+
+    public List<ExpertUnavailablePeriod> unavailablePeriods(Long userId)
+    {
+        ensureExpertUser(userId);
+        return platformMapper.selectUnavailablePeriodsByUserId(userId);
+    }
+
+    public List<Map<String, Object>> profileVersions(Long userId)
+    {
+        ensureExpertUser(userId);
+        return versionService.timeline(userId);
+    }
+
+    public Map<String, Object> profileVersion(Long userId, Long releaseId)
+    {
+        ensureExpertUser(userId);
+        return versionService.detail(userId, releaseId);
+    }
+
     public Map<String, Object> graph(Long userId)
     {
         ensureExpertUser(userId);
@@ -90,7 +131,8 @@ public class ExpertAdminService
         }
         boolean published = "APPROVED".equals(profile.getReviewStatus())
                 && profile.getGraphVersion() != null && profile.getGraphVersion() > 0;
-        String scoreStatus = published ? "APPROVED" : "DRAFT";
+        // 当前视图读取最新已审核材料重建的有效画像，历史正式版本由快照保存。
+        String scoreStatus = "DRAFT";
         List<ExpertGraphDimension> allDimensions =
                 dimensionViewService.dimensions(userId, scoreStatus);
         List<ExpertGraphDimension> available = allDimensions.stream()
@@ -194,6 +236,8 @@ public class ExpertAdminService
             {
                 throw new ServiceException("认证材料文件地址无效，请重新上传");
             }
+            material.setValidFrom(null);
+            material.setValidUntil(null);
         }
 
         List<String> missingAngles = new ArrayList<>();
@@ -224,6 +268,11 @@ public class ExpertAdminService
         {
             serviceStatus = existing.getServiceStatus();
         }
+        if (wasCertified && creditService.isBelowThreshold(userId)
+                && !"EXITED".equals(serviceStatus))
+        {
+            serviceStatus = "CREDIT_BLOCKED";
+        }
         if (!SERVICE_STATUSES.contains(serviceStatus))
         {
             throw new ServiceException("不支持的接单状态");
@@ -252,7 +301,24 @@ public class ExpertAdminService
             material.setFileType(extractExtension(material.getFileName()));
             material.setCreateBy(operatorName);
             material.setUpdateBy(operatorName);
+            if ("1".equals(String.valueOf(anglesByCode.get(categoryCode)
+                    .get("validityRequired"))))
+            {
+                LocalDate approvedDate = LocalDate.now();
+                material.setValidFrom(approvedDate.toString());
+                material.setValidUntil(approvedDate.plusMonths(3).toString());
+            }
             platformMapper.insertAdminApprovedMaterial(material);
+            ExpertMaterialFile file = new ExpertMaterialFile();
+            file.setMaterialId(material.getMaterialId());
+            file.setFileName(material.getFileName());
+            file.setFilePath(material.getFilePath());
+            file.setFileType(material.getFileType());
+            file.setFileSize(material.getFileSize());
+            file.setSortNo(0);
+            file.setCreateBy(operatorName);
+            file.setUpdateBy(operatorName);
+            platformMapper.insertMaterialFile(file);
             materialIds.add(material.getMaterialId());
             sourceMaterialId = material.getMaterialId();
             Object previousStatusValue = anglesByCode.get(categoryCode).get("reviewStatus");
@@ -286,6 +352,9 @@ public class ExpertAdminService
                 Map.of("userId", userId, "operatorId", operatorId));
         if (previousServiceStatus != null && !previousServiceStatus.equals(serviceStatus))
         {
+            // 管理员直接调整状态时，同一事务内作废未处理申请，防止审核员随后覆盖管理员结果。
+            platformMapper.cancelPendingStatusRequests(userId, operatorName,
+                    "管理员直接调整接单状态，原申请自动作废");
             String reason = restoring ? "管理员恢复专家档案" : "管理员维护专家总体情况";
             platformMapper.insertStatusLog(userId, previousServiceStatus, serviceStatus, reason,
                     "0", operatorId, operatorName);
@@ -311,10 +380,18 @@ public class ExpertAdminService
         ExpertMaterial query = new ExpertMaterial();
         query.setUserId(userId);
         List<ExpertMaterial> materials = platformMapper.selectMaterialList(query);
-        List<String> objectUris = materials.stream()
-                .map(ExpertMaterial::getFilePath)
-                .filter(StringUtils::isNotEmpty)
-                .toList();
+        Set<String> objectUris = new HashSet<>();
+        for (ExpertMaterial material : materials)
+        {
+            if (StringUtils.isNotEmpty(material.getFilePath()))
+            {
+                objectUris.add(material.getFilePath());
+            }
+            platformMapper.selectMaterialFiles(material.getMaterialId()).stream()
+                    .map(ExpertMaterialFile::getFilePath)
+                    .filter(StringUtils::isNotEmpty)
+                    .forEach(objectUris::add);
+        }
 
         graphOutboxService.enqueue("EXPERT_DELETED", "EXPERT", userId,
                 Map.of("userId", userId, "operatorId", operatorId));
@@ -324,6 +401,7 @@ public class ExpertAdminService
         platformMapper.deleteFieldMappingsByUserId(userId);
         platformMapper.deleteMaterialsByUserId(userId);
         platformMapper.deleteReviewLogsByUserId(userId);
+        platformMapper.deleteStatusRequestsByUserId(userId);
         platformMapper.deleteStatusLogsByUserId(userId);
         platformMapper.deleteGraphScoresByUserId(userId);
         platformMapper.deleteModelCallLogsByUserId(userId);

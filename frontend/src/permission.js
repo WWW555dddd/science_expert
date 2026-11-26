@@ -1,4 +1,4 @@
-import router from './router'
+import router, { notFoundRoute } from './router'
 import { ElMessage } from 'element-plus'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
@@ -16,6 +16,12 @@ const whiteList = ['/login', '/register']
 
 const isWhiteList = (path) => {
   return whiteList.some(pattern => isPathMatch(pattern, path))
+}
+
+function registerNotFoundRoute() {
+  if (!router.hasRoute('NotFound')) {
+    router.addRoute(notFoundRoute)
+  }
 }
 
 router.beforeEach(async (to, from) => {
@@ -51,14 +57,21 @@ router.beforeEach(async (to, from) => {
             router.addRoute(route)
           }
         })
+        registerNotFoundRoute()
         // 重新导航到目标路由，确保动态路由已注册
-        return { ...to, replace: true }
+        return {
+          path: to.path,
+          query: to.query,
+          hash: to.hash,
+          replace: true
+        }
       } catch (err) {
         await useUserStore().logOut()
         ElMessage.error(err)
         return { path: '/' }
       }
     }
+    registerNotFoundRoute()
     return true
   } else {
     // 没有token

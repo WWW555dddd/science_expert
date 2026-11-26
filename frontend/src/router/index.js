@@ -48,11 +48,6 @@ export const constantRoutes = [
     hidden: true
   },
   {
-    path: "/:pathMatch(.*)*",
-    component: () => import('@/views/error/404'),
-    hidden: true
-  },
-  {
     path: '/401',
     component: () => import('@/views/error/401'),
     hidden: true
@@ -91,6 +86,14 @@ export const constantRoutes = [
     ]
   }
 ]
+
+// 404 必须在动态权限路由注册完成后再添加，避免刷新深层页面时先匹配到兜底路由。
+export const notFoundRoute = {
+  path: '/:pathMatch(.*)*',
+  component: () => import('@/views/error/404'),
+  name: 'NotFound',
+  hidden: true
+}
 
 // 动态路由，基于用户权限动态去加载
 export const dynamicRoutes = [

@@ -25,14 +25,17 @@ public final class ExpertAgentAnalysisValidator
             "industry_field", "service_region", "phone", "email");
     private static final Set<String> EMPTY_EVIDENCE_MARKERS = Set.of(
             "无", "无证据", "暂无", "暂无证据", "未知", "无法确认", "n/a", "none", "null");
+    private static final Set<String> WEAK_EVIDENCE_MARKERS = Set.of(
+            "未披露", "未提及", "未明确", "未提供", "无法准确", "无法判断",
+            "可能具备", "可能涉及", "可能具有", "通常具备", "一般具备",
+            "可合理推断", "应较高", "一定基础", "推测", "估计具备");
     private static final Set<String> GRAPH_ENTITY_TYPES = Set.of(
-            "Organization", "Credential", "Capability", "Industry", "Project",
-            "Achievement", "Technology", "ServiceRegion", "Certification", "Material", "Expert");
+            "Industry", "Expert", "Organization", "Credential", "Capability",
+            "Project", "Achievement", "Technology", "ServiceRegion");
     private static final Set<String> GRAPH_RELATION_TYPES = Set.of(
-            "BELONGS_TO", "HAS_CREDENTIAL", "EXPERTISE_IN", "WORKS_IN_INDUSTRY",
+            "HAS_EXPERT", "BELONGS_TO", "HAS_CREDENTIAL", "EXPERTISE_IN", "WORKS_IN_INDUSTRY",
             "SERVES_REGION", "PARTICIPATED_IN", "PRODUCED", "PROJECT_PRODUCED",
-            "USES_TECHNOLOGY", "APPLIES_TO", "ACHIEVEMENT_BASED_ON",
-            "HAS_CERTIFICATION", "CERTIFIED_BY");
+            "USES_TECHNOLOGY", "APPLIES_TO", "TARGETS_INDUSTRY");
 
     private ExpertAgentAnalysisValidator()
     {
@@ -94,7 +97,8 @@ public final class ExpertAgentAnalysisValidator
     public static boolean hasUsableEvidence(String value)
     {
         return value != null && !value.isBlank()
-                && !EMPTY_EVIDENCE_MARKERS.contains(value.trim().toLowerCase(Locale.ROOT));
+                && !EMPTY_EVIDENCE_MARKERS.contains(value.trim().toLowerCase(Locale.ROOT))
+                && !containsWeakMarker(value);
     }
 
     public static void validate(JSONObject analysis, Set<String> allowedDimensions)
@@ -167,8 +171,8 @@ public final class ExpertAgentAnalysisValidator
         requireExactProperties(facts, Set.of("entities", "relations"), "graphFacts");
         JSONArray entities = requireArray(facts.get("entities"), "graphFacts.entities");
         JSONArray relations = requireArray(facts.get("relations"), "graphFacts.relations");
-        require(entities.size() <= 30, "graphFacts.entities 不能超过 30 条");
-        require(relations.size() <= 30, "graphFacts.relations 不能超过 30 条");
+        require(entities.size() <= 12, "graphFacts.entities 不能超过 12 条");
+        require(relations.size() <= 12, "graphFacts.relations 不能超过 12 条");
 
         for (int index = 0; index < entities.size(); index++)
         {
@@ -228,8 +232,15 @@ public final class ExpertAgentAnalysisValidator
     private static void requireEvidence(Object value, String path)
     {
         String evidence = requireText(value, path);
-        require(!EMPTY_EVIDENCE_MARKERS.contains(evidence.toLowerCase(Locale.ROOT)),
-                path + " 不能使用无证据或未知占位内容");
+        require(!EMPTY_EVIDENCE_MARKERS.contains(evidence.toLowerCase(Locale.ROOT))
+                        && !containsWeakMarker(evidence),
+                path + " 不能使用无证据、缺失或推测性内容");
+    }
+
+    private static boolean containsWeakMarker(String evidence)
+    {
+        String normalized = evidence.toLowerCase(Locale.ROOT);
+        return WEAK_EVIDENCE_MARKERS.stream().anyMatch(normalized::contains);
     }
 
     private static void requireRange(Object value, double min, double max, String path)

@@ -33,6 +33,9 @@ public class ExpertIngestPersistenceService
     @Autowired
     private ExpertProfileDimensionAggregationService dimensionAggregationService;
 
+    @Autowired
+    private ExpertVersionService versionService;
+
     @Transactional
     public boolean persist(PersistCommand command)
     {
@@ -74,9 +77,8 @@ public class ExpertIngestPersistenceService
 
         graphFactPersistenceService.persist(command.userId(), command.materialId(),
                 command.graphFacts(), command.graphFactSource(), command.adminApproved());
-        graphFactPersistenceService.persistDimensionAssessments(command.userId(),
-                command.materialId(), command.remoteAnalysis(), command.adminApproved());
-        dimensionAggregationService.rebuildDraft(profile);
+        dimensionAggregationService.recordAndAggregate(profile, command.materialId(),
+                command.remoteAnalysis(), command.adminApproved());
 
         if (!command.adminApproved())
         {
@@ -89,6 +91,11 @@ public class ExpertIngestPersistenceService
             ExpertProfile approvedProfile = platformMapper.selectProfileByUserId(command.userId());
             platformMapper.upsertApprovedExpert(approvedProfile, command.materialId(),
                     "管理员模型辅助直审", JSON.toJSONString(approvedProfile));
+        }
+        if (command.adminApproved())
+        {
+            versionService.captureApprovedState(command.userId(), "管理员模型辅助直审",
+                    "ADMIN_MATERIAL_APPROVED");
         }
         enqueueProcessedEvent(command);
         return true;

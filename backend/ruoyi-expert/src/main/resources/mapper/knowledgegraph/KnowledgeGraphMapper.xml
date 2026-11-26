@@ -84,13 +84,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
           and (valid_to is null or valid_to &gt; sysdate())
     </update>
 
-    <update id="expireCertificationMaterialRelations">
+    <update id="expireIndustryExpertRelations">
         update kg_relation
         set valid_to = sysdate(),
             update_time = sysdate()
-        where source_entity_id = #{sourceEntityId}
-          and source_kind = 'CERTIFICATION_PROJECTION'
-          and relation_type = 'CERTIFIED_BY'
+        where target_entity_id = #{expertEntityId}
+          and relation_type = 'HAS_EXPERT'
+          and source_kind = 'PROFILE_PROJECTION'
           and (valid_to is null or valid_to &gt; sysdate())
     </update>
 
@@ -106,13 +106,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         insert into kg_evidence
         (evidence_key, relation_id, entity_id, source_type, source_ref,
          material_id, page_no, char_start, char_end, quote_hash, excerpt,
-         confidence, extractor_version, create_time)
+         confidence, review_status, extractor_version, create_time)
         values
         (#{evidenceKey}, #{relationId}, #{entityId,jdbcType=BIGINT},
          #{sourceType}, #{sourceRef}, #{materialId,jdbcType=BIGINT},
          #{pageNo,jdbcType=INTEGER}, #{charStart,jdbcType=INTEGER},
          #{charEnd,jdbcType=INTEGER}, #{quoteHash}, #{excerpt},
-         #{confidence}, #{extractorVersion}, sysdate())
+         #{confidence}, 'PENDING', #{extractorVersion}, sysdate())
         on duplicate key update
             relation_id = values(relation_id),
             entity_id = values(entity_id),
@@ -125,6 +125,16 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             quote_hash = values(quote_hash),
             excerpt = values(excerpt),
             confidence = values(confidence),
+            review_status = 'PENDING',
+            reviewed_excerpt = null,
+            reviewed_source_name = null,
+            reviewed_source_type = null,
+            reviewed_relation_type = null,
+            reviewed_target_name = null,
+            reviewed_target_type = null,
+            review_comment = null,
+            reviewer_name = null,
+            review_time = null,
             extractor_version = values(extractor_version)
     </insert>
 
@@ -135,12 +145,217 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             from kg_evidence
             where material_id = #{materialId}
         ) material_relations on material_relations.relation_id = r.relation_id
-        set r.review_status = #{reviewStatus},
+        left join (
+            select ev.relation_id, count(1) supporting_evidence_count
+            from kg_evidence ev
+            join expert_material em on em.material_id = ev.material_id
+            where em.review_status = 'APPROVED'
+              and em.material_id = (
+                  select max(active_m.material_id)
+                  from expert_material active_m
+                  where active_m.user_id = em.user_id
+                    and active_m.material_category = em.material_category
+                    and active_m.review_status = 'APPROVED'
+              )
+            group by ev.relation_id
+        ) active_support on active_support.relation_id = r.relation_id
+        set r.review_status = case
+                when #{reviewStatus} = 'ACCEPTED' and r.review_status = 'REJECTED'
+                    then 'REJECTED'
+                when #{reviewStatus} = 'ACCEPTED' then 'ACCEPTED'
+                when coalesce(active_support.supporting_evidence_count, 0) &gt; 0
+                    then 'ACCEPTED'
+                else 'REJECTED'
+            end,
             r.valid_to = case
-                when #{reviewStatus} = 'REJECTED' then coalesce(r.valid_to, sysdate())
-                else null
+                when #{reviewStatus} = 'ACCEPTED' then r.valid_to
+                when #{reviewStatus} = 'REJECTED'
+                 and coalesce(active_support.supporting_evidence_count, 0) = 0
+                    then coalesce(r.valid_to, sysdate())
+                else r.valid_to
             end,
             r.update_time = sysdate()
+    </update>
+
+    <select id="selectMaterialReviewFacts" parameterType="Long" resultType="map">
+        select r.relation_id relationId,
+               coalesce(max(ev.reviewed_relation_type), r.relation_type) relationType,
+               r.relation_type originalRelationType,
+               max(ev.reviewed_relation_type) reviewedRelationType,
+               coalesce(max(ev.reviewed_source_name), se.canonical_name) sourceName,
+               se.canonical_name originalSourceName,
+               max(ev.reviewed_source_name) reviewedSourceName,
+               coalesce(max(ev.reviewed_source_type), se.entity_type) sourceType,
+               se.entity_type originalSourceType,
+               max(ev.reviewed_source_type) reviewedSourceType,
+               coalesce(max(ev.reviewed_target_name), te.canonical_name) targetName,
+               te.canonical_name originalTargetName,
+               max(ev.reviewed_target_name) reviewedTargetName,
+               coalesce(max(ev.reviewed_target_type), te.entity_type) targetType,
+               te.entity_type originalTargetType,
+               max(ev.reviewed_target_type) reviewedTargetType,
+               case
+                   when sum(case when ev.review_status = 'PENDING' then 1 else 0 end) &gt; 0
+                       then 'PENDING'
+                   when sum(case when ev.review_status = 'REJECTED' then 1 else 0 end) &gt; 0
+                       then 'REJECTED'
+                   else 'ACCEPTED'
+               end reviewStatus,
+               r.confidence relationConfidence,
+               coalesce(max(ev.reviewed_excerpt), max(ev.excerpt)) excerpt,
+               max(ev.excerpt) originalExcerpt,
+               max(ev.reviewed_excerpt) reviewedExcerpt,
+               max(ev.review_comment) reviewComment,
+               max(ev.confidence) evidenceConfidence,
+               count(1) evidenceCount
+        from kg_relation r
+        join kg_evidence ev on ev.relation_id = r.relation_id
+        join kg_entity se on se.entity_id = r.source_entity_id
+        join kg_entity te on te.entity_id = r.target_entity_id
+        where ev.material_id = #{materialId}
+        group by r.relation_id, r.relation_type,
+                 se.canonical_name, se.entity_type,
+                 te.canonical_name, te.entity_type,
+                 r.confidence
+        order by r.relation_id
+    </select>
+
+    <update id="updateMaterialRelationReview">
+        update kg_evidence
+        set review_status = #{reviewStatus}
+        where material_id = #{materialId}
+          and relation_id = #{relationId}
+    </update>
+
+    <update id="updateMaterialRelationOpinion">
+        update kg_evidence
+        set reviewed_excerpt = #{reviewedExcerpt},
+            reviewed_source_name = #{reviewedSourceName},
+            reviewed_source_type = #{reviewedSourceType},
+            reviewed_relation_type = #{reviewedRelationType},
+            reviewed_target_name = #{reviewedTargetName},
+            reviewed_target_type = #{reviewedTargetType},
+            review_comment = #{reviewComment},
+            reviewer_name = #{reviewerName},
+            review_time = sysdate()
+        where material_id = #{materialId}
+          and relation_id = #{relationId}
+          and review_status = 'PENDING'
+    </update>
+
+    <update id="applyRelationSourceReview">
+        update kg_entity e
+        join kg_relation r on r.source_entity_id = e.entity_id
+        join (
+            select max(reviewed_source_name) reviewed_name,
+                   max(reviewed_source_type) reviewed_type
+            from kg_evidence
+            where material_id = #{materialId}
+              and relation_id = #{relationId}
+        ) reviewed on reviewed.reviewed_name is not null
+        set e.canonical_name = reviewed.reviewed_name,
+            e.entity_type = coalesce(reviewed.reviewed_type, e.entity_type),
+            e.normalized_name = lower(trim(reviewed.reviewed_name)),
+            e.update_time = sysdate()
+        where r.relation_id = #{relationId}
+    </update>
+
+    <update id="applyRelationTargetReview">
+        update kg_entity e
+        join kg_relation r on r.target_entity_id = e.entity_id
+        join (
+            select max(reviewed_target_name) reviewed_name,
+                   max(reviewed_target_type) reviewed_type
+            from kg_evidence
+            where material_id = #{materialId}
+              and relation_id = #{relationId}
+        ) reviewed on reviewed.reviewed_name is not null
+        set e.canonical_name = reviewed.reviewed_name,
+            e.entity_type = coalesce(reviewed.reviewed_type, e.entity_type),
+            e.normalized_name = lower(trim(reviewed.reviewed_name)),
+            e.update_time = sysdate()
+        where r.relation_id = #{relationId}
+    </update>
+
+    <update id="applyRelationTypeReview">
+        update kg_relation r
+        join (
+            select max(reviewed_relation_type) reviewed_type
+            from kg_evidence
+            where material_id = #{materialId}
+              and relation_id = #{relationId}
+        ) reviewed on reviewed.reviewed_type is not null
+        set r.relation_type = reviewed.reviewed_type,
+            r.update_time = sysdate()
+        where r.relation_id = #{relationId}
+    </update>
+
+    <update id="applyMaterialSourceReviews">
+        update kg_entity e
+        join kg_relation r on r.source_entity_id = e.entity_id
+                         and r.review_status = 'ACCEPTED'
+        join (
+            select relation_id, max(reviewed_source_name) reviewed_name,
+                   max(reviewed_source_type) reviewed_type
+            from kg_evidence
+            where material_id = #{materialId}
+              and reviewed_source_name is not null
+            group by relation_id
+        ) reviewed on reviewed.relation_id = r.relation_id
+        set e.canonical_name = reviewed.reviewed_name,
+            e.entity_type = coalesce(reviewed.reviewed_type, e.entity_type),
+            e.normalized_name = lower(trim(reviewed.reviewed_name)),
+            e.update_time = sysdate()
+    </update>
+
+    <update id="applyMaterialTargetReviews">
+        update kg_entity e
+        join kg_relation r on r.target_entity_id = e.entity_id
+                         and r.review_status = 'ACCEPTED'
+        join (
+            select relation_id, max(reviewed_target_name) reviewed_name,
+                   max(reviewed_target_type) reviewed_type
+            from kg_evidence
+            where material_id = #{materialId}
+              and reviewed_target_name is not null
+            group by relation_id
+        ) reviewed on reviewed.relation_id = r.relation_id
+        set e.canonical_name = reviewed.reviewed_name,
+            e.entity_type = coalesce(reviewed.reviewed_type, e.entity_type),
+            e.normalized_name = lower(trim(reviewed.reviewed_name)),
+            e.update_time = sysdate()
+    </update>
+
+    <update id="applyMaterialRelationTypeReviews">
+        update kg_relation r
+        join (
+            select relation_id, max(reviewed_relation_type) reviewed_type
+            from kg_evidence
+            where material_id = #{materialId}
+              and reviewed_relation_type is not null
+            group by relation_id
+        ) reviewed on reviewed.relation_id = r.relation_id
+        set r.relation_type = reviewed.reviewed_type,
+            r.update_time = sysdate()
+        where r.review_status = 'ACCEPTED'
+    </update>
+
+    <update id="updateRelationReviewStatus">
+        update kg_relation
+        set review_status = #{reviewStatus},
+            valid_to = case
+                when #{reviewStatus} = 'REJECTED' then coalesce(valid_to, sysdate())
+                when #{reviewStatus} = 'ACCEPTED' then null
+                else valid_to
+            end,
+            update_time = sysdate()
+        where relation_id = #{relationId}
+    </update>
+
+    <update id="reviewMaterialEvidence">
+        update kg_evidence
+        set review_status = #{reviewStatus}
+        where material_id = #{materialId}
     </update>
 
     <update id="acceptMaterialEntities">
@@ -171,6 +386,33 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         from kg_evidence e
         join expert_material m on m.material_id = e.material_id
         where m.user_id = #{userId}
+    </delete>
+
+    <delete id="deleteMaterialGraphEvidence">
+        delete from kg_evidence
+        where material_id = #{materialId}
+    </delete>
+
+    <delete id="deleteMaterialGraphRelations">
+        delete r
+        from kg_relation r
+        join (
+            select distinct relation_id
+            from kg_evidence
+            where material_id = #{materialId}
+              and relation_id is not null
+        ) material_relations on material_relations.relation_id = r.relation_id
+        where r.source_kind in ('LLM', 'RULE')
+    </delete>
+
+    <delete id="deleteOrphanMaterialRelations">
+        delete from kg_relation
+        where source_kind in ('LLM', 'RULE')
+          and not exists (
+              select 1
+              from kg_evidence ev
+              where ev.relation_id = kg_relation.relation_id
+          )
     </delete>
 
     <insert id="insertOutboxEvent" parameterType="map">
@@ -281,6 +523,117 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         order by entity_id
     </select>
 
+    <select id="selectOverviewEntities" resultType="map">
+        select e.entity_id entityId, e.entity_type entityType,
+               e.external_key externalKey, e.canonical_name canonicalName,
+               e.normalized_name normalizedName, e.properties_json propertiesJson,
+               e.review_status reviewStatus, e.ontology_version ontologyVersion,
+               e.create_time createTime, e.update_time updateTime,
+               (
+                   select count(1)
+                   from kg_evidence ev
+                   where ev.entity_id = e.entity_id
+               ) evidenceCount
+        from kg_entity e
+        where e.review_status = 'ACCEPTED'
+          and e.entity_type in (
+            'Industry', 'Expert', 'Project', 'Achievement', 'Technology',
+            'Capability', 'ServiceRegion', 'Organization', 'Credential'
+          )
+          and exists (
+            select 1
+            from kg_relation current_relation
+            join kg_evidence current_ev
+              on current_ev.relation_id = current_relation.relation_id
+            left join expert_material current_m
+              on current_m.material_id = current_ev.material_id
+            where (
+                current_relation.source_entity_id = e.entity_id
+                or current_relation.target_entity_id = e.entity_id
+              )
+              and current_relation.review_status = 'ACCEPTED'
+              and (current_relation.valid_to is null or current_relation.valid_to &gt; sysdate())
+              and (
+                current_ev.material_id is null
+                or (
+                  current_m.review_status = 'APPROVED'
+                  and current_m.material_id = (
+                      select max(latest_m.material_id)
+                      from expert_material latest_m
+                      where latest_m.user_id = current_m.user_id
+                        and latest_m.material_category = current_m.material_category
+                        and latest_m.review_status = 'APPROVED'
+                  )
+                )
+              )
+          )
+        order by case e.entity_type
+                   when 'Industry' then 0
+                   when 'Expert' then 1
+                   when 'Project' then 2
+                   when 'Achievement' then 3
+                   when 'Technology' then 4
+                   when 'Capability' then 5
+                   when 'ServiceRegion' then 6
+                   when 'Organization' then 7
+                   when 'Credential' then 8
+                   else 9 end,
+                 e.canonical_name
+        limit #{limit}
+    </select>
+
+    <select id="selectOverviewRelations" resultType="map">
+        select r.relation_id relationId, r.relation_type relationType,
+               r.source_entity_id sourceEntityId, se.entity_type sourceEntityType,
+               se.canonical_name sourceEntityName,
+               r.target_entity_id targetEntityId, te.entity_type targetEntityType,
+               te.canonical_name targetEntityName,
+               r.confidence, r.valid_from validFrom, r.valid_to validTo,
+               r.review_status reviewStatus, r.ontology_version ontologyVersion,
+               r.source_kind sourceKind, r.properties_json propertiesJson,
+               (
+                   select count(1)
+                   from kg_evidence ev
+                   where ev.relation_id = r.relation_id
+               ) evidenceCount
+        from kg_relation r
+        join kg_entity se on se.entity_id = r.source_entity_id
+        join kg_entity te on te.entity_id = r.target_entity_id
+        where r.review_status = 'ACCEPTED'
+          and (r.valid_to is null or r.valid_to &gt; sysdate())
+          and se.review_status = 'ACCEPTED'
+          and te.review_status = 'ACCEPTED'
+          and se.entity_type &lt;&gt; 'Task'
+          and te.entity_type &lt;&gt; 'Task'
+          and exists (
+            select 1
+            from kg_evidence current_ev
+            left join expert_material current_m
+              on current_m.material_id = current_ev.material_id
+            where current_ev.relation_id = r.relation_id
+              and (
+                current_ev.material_id is null
+                or (
+                  current_m.review_status = 'APPROVED'
+                  and current_m.material_id = (
+                      select max(latest_m.material_id)
+                      from expert_material latest_m
+                      where latest_m.user_id = current_m.user_id
+                        and latest_m.material_category = current_m.material_category
+                        and latest_m.review_status = 'APPROVED'
+                  )
+                )
+              )
+          )
+        order by case r.relation_type
+                   when 'HAS_EXPERT' then 0
+                   when 'PARTICIPATED_IN' then 1
+                   when 'PRODUCED' then 2
+                   else 3 end,
+                 r.relation_id
+        limit #{limit}
+    </select>
+
     <select id="selectExtractedEntitiesByUserId" resultType="map">
         select distinct e.entity_id entityId, e.entity_type entityType,
                e.external_key externalKey, e.canonical_name canonicalName,
@@ -291,6 +644,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         join kg_evidence ev on ev.entity_id = e.entity_id
         join expert_material m on m.material_id = ev.material_id
         where m.user_id = #{userId}
+          and m.review_status = 'APPROVED'
+          and m.material_id = (
+              select max(m2.material_id)
+              from expert_material m2
+              where m2.user_id = m.user_id
+                and m2.material_category = m.material_category
+                and m2.review_status = 'APPROVED'
+          )
           and e.review_status &lt;&gt; 'REJECTED'
         order by e.entity_id
     </select>
@@ -309,6 +670,26 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         join kg_entity te on te.entity_id = r.target_entity_id
         where r.review_status &lt;&gt; 'REJECTED'
           and (r.valid_to is null or r.valid_to &gt; sysdate())
+          and exists (
+            select 1
+            from kg_evidence current_ev
+            left join expert_material current_m
+              on current_m.material_id = current_ev.material_id
+            where current_ev.relation_id = r.relation_id
+              and (
+                current_ev.material_id is null
+                or (
+                  current_m.review_status = 'APPROVED'
+                  and current_m.material_id = (
+                      select max(latest_m.material_id)
+                      from expert_material latest_m
+                      where latest_m.user_id = current_m.user_id
+                        and latest_m.material_category = current_m.material_category
+                        and latest_m.review_status = 'APPROVED'
+                  )
+                )
+              )
+          )
           and (
             r.source_entity_id in
             <foreach collection="entityIds" item="entityId" open="(" separator="," close=")">
@@ -323,107 +704,63 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <select id="selectEvidenceByRelationIds" resultType="map">
-        select evidence_id evidenceId, evidence_key evidenceKey,
-               relation_id relationId, entity_id entityId,
-               source_type sourceType, source_ref sourceRef, material_id materialId,
-               page_no pageNo, char_start charStart, char_end charEnd,
-               quote_hash quoteHash, excerpt, confidence,
-               extractor_version extractorVersion, create_time createTime
-        from kg_evidence
-        where relation_id in
+        select ev.evidence_id evidenceId, ev.evidence_key evidenceKey,
+               ev.relation_id relationId, ev.entity_id entityId,
+               ev.source_type sourceType, ev.source_ref sourceRef,
+               ev.material_id materialId,
+               ev.page_no pageNo, ev.char_start charStart, ev.char_end charEnd,
+               ev.quote_hash quoteHash, ev.excerpt, ev.confidence,
+               ev.extractor_version extractorVersion, ev.create_time createTime
+        from kg_evidence ev
+        left join expert_material m on m.material_id = ev.material_id
+        where ev.relation_id in
         <foreach collection="relationIds" item="relationId" open="(" separator="," close=")">
             #{relationId}
         </foreach>
-        order by relation_id, evidence_id
+          and (
+            ev.material_id is null
+            or (
+              m.review_status = 'APPROVED'
+              and m.material_id = (
+                  select max(latest_m.material_id)
+                  from expert_material latest_m
+                  where latest_m.user_id = m.user_id
+                    and latest_m.material_category = m.material_category
+                    and latest_m.review_status = 'APPROVED'
+              )
+            )
+          )
+        order by ev.relation_id, ev.evidence_id
     </select>
 
     <select id="selectEvidenceByEntityIds" resultType="map">
-        select evidence_id evidenceId, evidence_key evidenceKey,
-               relation_id relationId, entity_id entityId,
-               source_type sourceType, source_ref sourceRef, material_id materialId,
-               page_no pageNo, char_start charStart, char_end charEnd,
-               quote_hash quoteHash, excerpt, confidence,
-               extractor_version extractorVersion, create_time createTime
-        from kg_evidence
-        where entity_id in
+        select ev.evidence_id evidenceId, ev.evidence_key evidenceKey,
+               ev.relation_id relationId, ev.entity_id entityId,
+               ev.source_type sourceType, ev.source_ref sourceRef,
+               ev.material_id materialId,
+               ev.page_no pageNo, ev.char_start charStart, ev.char_end charEnd,
+               ev.quote_hash quoteHash, ev.excerpt, ev.confidence,
+               ev.extractor_version extractorVersion, ev.create_time createTime
+        from kg_evidence ev
+        left join expert_material m on m.material_id = ev.material_id
+        where ev.entity_id in
         <foreach collection="entityIds" item="entityId" open="(" separator="," close=")">
             #{entityId}
         </foreach>
-        order by entity_id, evidence_id
-    </select>
-
-    <select id="selectCapabilityMappings" resultType="map">
-        select dimension_code dimensionCode, capability_code capabilityCode,
-               capability_name capabilityName, ontology_version ontologyVersion
-        from kg_dimension_capability_map
-        order by dimension_code
-    </select>
-
-    <select id="selectDimensionAssessments" resultType="map">
-        select a.entity_id assessmentEntityId,
-               a.canonical_name assessmentName,
-               a.properties_json propertiesJson,
-               a.review_status assessmentStatus,
-               r.relation_id relationId,
-               r.review_status relationStatus,
-               r.confidence relationConfidence,
-               ev.evidence_id evidenceId,
-               ev.material_id materialId,
-               ev.excerpt evidence,
-               ev.confidence evidenceConfidence,
-               ev.source_type sourceType,
-               ev.source_ref sourceRef,
-               m.material_category materialCategory,
-               m.version_no versionNo,
-               m.file_name fileName
-        from kg_entity a
-        join kg_relation r
-          on r.target_entity_id = a.entity_id
-         and r.relation_type = 'ASSESSED_AS'
-        join kg_entity expert
-          on expert.entity_id = r.source_entity_id
-         and expert.entity_type = 'Expert'
-         and expert.external_key = concat('expert:', #{userId})
-        join kg_evidence ev
-          on ev.relation_id = r.relation_id
-        join expert_material m
-          on m.material_id = ev.material_id
-        where a.entity_type = 'CapabilityAssessment'
-          and r.valid_to is null
-          and r.review_status in ('PENDING', 'ACCEPTED')
-          and m.material_id = (
-              select max(m2.material_id)
-              from expert_material m2
-              where m2.user_id = #{userId}
-                and m2.material_category = m.material_category
+          and (
+            ev.material_id is null
+            or (
+              m.review_status = 'APPROVED'
+              and m.material_id = (
+                  select max(latest_m.material_id)
+                  from expert_material latest_m
+                  where latest_m.user_id = m.user_id
+                    and latest_m.material_category = m.material_category
+                    and latest_m.review_status = 'APPROVED'
+              )
+            )
           )
-        <if test="acceptedOnly">
-          and a.review_status = 'ACCEPTED'
-          and r.review_status = 'ACCEPTED'
-        </if>
-        order by m.material_category, a.entity_id, ev.evidence_id
+        order by ev.entity_id, ev.evidence_id
     </select>
 
-    <delete id="deleteMaterialAssessments">
-        delete ev
-        from kg_evidence ev
-        where ev.material_id = #{materialId}
-          and ev.source_ref like concat('material:', #{materialId}, ':dimension:%');
-    </delete>
-
-    <delete id="deleteMaterialAssessmentRelations">
-        delete r
-        from kg_relation r
-        join kg_entity a
-          on r.source_entity_id = a.entity_id
-          or r.target_entity_id = a.entity_id
-        where a.entity_type = 'CapabilityAssessment'
-          and a.external_key like concat('assessment:', #{materialId}, ':%');
-    </delete>
-
-    <delete id="deleteMaterialAssessmentEntities">
-        delete from kg_entity
-        where entity_type = 'CapabilityAssessment'
-          and external_key like concat('assessment:', #{materialId}, ':%');
-    </delete>
 </mapper>

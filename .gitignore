@@ -1,6 +1,8 @@
 ﻿# Backend build
 backend/**/target/
 backend/logs/
+backend/sql/backups/
+backend/captcha.jpg
 *.log
 
 # Frontend dependencies and build
@@ -27,4 +29,6 @@ backend/**/application-local.properties
 /miniodata/
 
 # Root documentation
-/docs/
+/docs/*
+!/docs/业务派单系统未接入时的专家接口与模拟数据.md
+!/docs/课题一_专家平台工作交接说明.md

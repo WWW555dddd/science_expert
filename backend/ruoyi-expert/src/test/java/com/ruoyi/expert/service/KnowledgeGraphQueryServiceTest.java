@@ -115,6 +115,41 @@ class KnowledgeGraphQueryServiceTest
         assertEquals(1, result.get("relationCount"));
     }
 
+    @Test
+    void buildsAllExpertOverviewAndCountsSharedGroupEntities()
+    {
+        when(graphMapper.selectOverviewEntities(400)).thenReturn(List.of(
+                entity(10L, "Industry", "人工智能", null),
+                entity(11L, "Industry", "新能源", null),
+                entity(20L, "Expert", "李专家", null),
+                entity(21L, "Expert", "王专家", null),
+                entity(30L, "Project", "联合项目", null)));
+        when(graphMapper.selectOverviewRelations(800)).thenReturn(List.of(
+                relation(100L, 10L, "Industry", "人工智能",
+                        "HAS_EXPERT", 20L, "Expert", "李专家"),
+                relation(101L, 10L, "Industry", "人工智能",
+                        "HAS_EXPERT", 21L, "Expert", "王专家"),
+                relation(102L, 11L, "Industry", "新能源",
+                        "HAS_EXPERT", 21L, "Expert", "王专家"),
+                relation(103L, 20L, "Expert", "李专家",
+                        "PARTICIPATED_IN", 30L, "Project", "联合项目"),
+                relation(104L, 21L, "Expert", "王专家",
+                        "PARTICIPATED_IN", 30L, "Project", "联合项目")));
+
+        Map<String, Object> result = queryService.overviewSubgraph(400, 800);
+
+        assertEquals(2L, result.get("expertCount"));
+        assertEquals(2L, result.get("industryCount"));
+        assertEquals(5, result.get("entityCount"));
+        assertEquals(5, result.get("relationCount"));
+        assertEquals(2L, result.get("sharedEntityCount"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> groups =
+                (List<Map<String, Object>>) result.get("industryGroups");
+        assertEquals(2, groups.size());
+        assertEquals(2, groups.get(0).get("expertCount"));
+    }
+
     private static Map<String, Object> entity(Long id, String type, String name,
             String propertiesJson)
     {

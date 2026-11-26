@@ -1,10 +1,22 @@
 <template>
   <div class="app-container">
     <el-card shadow="never" class="upload-card">
+      <el-alert
+        v-for="reminder in qualificationReminders"
+        :key="reminder.reminderId"
+        class="qualification-alert"
+        :type="reminder.reminderType === 'EXPIRED' ? 'error' : 'warning'"
+        :closable="false"
+        show-icon
+        :title="reminder.reminderType === 'EXPIRED'
+          ? `${reminder.angleName}资质已过期，已暂停接单资格`
+          : `${reminder.angleName}资质将在 ${Math.max(0, reminder.daysRemaining)} 天后到期`"
+        :description="`${reminder.fileName} · 到期日 ${reminder.expiryDate}`"
+      />
       <div class="upload-header">
         <div>
           <h3>专家认证进度</h3>
-          <p>每个必选认证角度都需要审核通过，专家才会整体认证成功。材料更新后，该角度需要重新审核。</p>
+          <p>每个必选认证角度都需要审核通过。已有认证角度可维护版本内文件，逐份增加或删除，保存后整组重新审核。</p>
         </div>
         <el-tag :type="certTagType" effect="dark" size="large">{{ certifications.overallStatusText }}</el-tag>
       </div>
@@ -31,23 +43,32 @@
             <div class="angle-file">
               <template v-if="angle.materialId">
                 <span>{{ angle.fileName }}</span>
-                <small>V{{ angle.versionNo }} · {{ parseTime(angle.submitTime) }}</small>
+                <small>V{{ angle.versionNo }} · {{ angle.fileCount || 1 }} 份文件 · {{ parseTime(angle.submitTime) }}</small>
+                <small v-if="angle.effectiveMaterialId && angle.effectiveMaterialId !== angle.materialId">
+                  当前生效：V{{ angle.effectiveVersionNo }} · {{ angle.effectiveFileName }}
+                </small>
+                <small v-else-if="angle.reviewStatus === 'APPROVED'">
+                  当前生效版本
+                </small>
+                <small v-if="angle.validityRequired === '1'" class="validity-summary">
+                  审核有效期：{{ validityRemainingText(angle) }}
+                </small>
                 <small v-if="angle.reviewComment" class="review-comment">
                   退回意见：{{ angle.reviewComment }}
                 </small>
                 <small v-else-if="angle.latestReturnComment" class="review-comment">
                   上次退回意见：{{ angle.latestReturnComment }}
                 </small>
-                <el-button link type="primary" @click="handlePreview(angle)">预览最新文件</el-button>
               </template>
               <span v-else>尚未上传该角度材料</span>
             </div>
             <el-upload
+              v-if="!angle.materialId"
               :action="uploadAction"
               :headers="uploadHeaders"
               :show-file-list="false"
-              :before-upload="beforeUpload"
-              :on-success="(response, file) => handleUploadSuccess(response, file, angle.categoryCode)"
+              :before-upload="file => beforeUpload(file, angle)"
+              :on-success="(response, file) => handleUploadSuccess(response, file, angle)"
               :on-error="handleUploadError"
               accept=".pdf,.docx,.txt,.csv,.md,.png,.jpg,.jpeg"
             >
@@ -60,6 +81,16 @@
                 {{ angleButtonText(angle) }}
               </el-button>
             </el-upload>
+            <el-button
+              v-else
+              type="primary"
+              plain
+              icon="FolderOpened"
+              v-hasPermi="['expert:material:add']"
+              @click="openFileDrawer(angle)"
+            >
+              维护版本文件
+            </el-button>
           </el-card>
         </el-col>
       </el-row>
@@ -68,11 +99,24 @@
     <el-card shadow="never" class="material-list" header="资料处理记录">
       <el-table :data="materials" v-loading="loading">
         <el-table-column label="文件名称" prop="fileName" min-width="210" show-overflow-tooltip />
+        <el-table-column label="文件数" width="80" align="center">
+          <template #default="{ row }">{{ row.fileCount || 1 }}</template>
+        </el-table-column>
+        <el-table-column label="审核有效期" width="210" align="center">
+          <template #default="{ row }">
+            {{ validityRemainingText(row) }}
+          </template>
+        </el-table-column>
         <el-table-column label="材料类别" width="120">
           <template #default="{ row }">{{ categoryText(row.materialCategory) }}</template>
         </el-table-column>
         <el-table-column label="版本" width="80" align="center">
-          <template #default="{ row }">V{{ row.versionNo }}</template>
+          <template #default="{ row }">
+            <div class="version-cell">
+              <span>V{{ row.versionNo }}</span>
+              <el-tag v-if="row.effectiveFlag === '1'" type="success" size="small" effect="plain">生效</el-tag>
+            </div>
+          </template>
         </el-table-column>
         <el-table-column label="处理进度" width="170">
           <template #default="{ row }">
@@ -100,12 +144,11 @@
           </template>
         </el-table-column>
         <el-table-column label="处理摘要" prop="agentMessage" min-width="260" show-overflow-tooltip />
-        <el-table-column label="上传时间" prop="createTime" width="170">
-          <template #default="{ row }">{{ parseTime(row.createTime) }}</template>
+        <el-table-column label="最近更新" prop="updateTime" width="170">
+          <template #default="{ row }">{{ parseTime(row.updateTime || row.createTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="90" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="handlePreview(row)">预览</el-button>
             <el-button link type="primary" @click="showDetail(row)">进度</el-button>
             <el-button
               v-if="row.jobStatus === 'FAILED'"
@@ -130,7 +173,7 @@
       <el-steps :active="jobStep(currentMaterial.jobStatus)" finish-status="success" align-center>
         <el-step title="排队" />
         <el-step title="提取脱敏" />
-        <el-step title="字段映射" />
+        <el-step title="基本信息提取" />
         <el-step title="模型/规则初审" />
         <el-step title="人工审核" />
       </el-steps>
@@ -163,17 +206,85 @@
         <el-button @click="previewOpen = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="fileDrawerOpen"
+      :title="`维护 ${fileAngle.angleName || '认证材料'} · V${fileAngle.versionNo || 1}`"
+      size="720px"
+      destroy-on-close
+    >
+      <div v-loading="fileLoading" class="file-maintainer">
+        <el-alert
+          title="新增或删除只作用于当前版本，不会覆盖已有文件。保存后整组文件会重新进入审核。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <div class="file-toolbar">
+          <span>当前版本共 {{ versionFiles.length }} 份文件</span>
+          <el-upload
+            :action="uploadAction"
+            :headers="uploadHeaders"
+            :show-file-list="false"
+            :before-upload="file => beforeUpload(file, fileAngle)"
+            :on-success="handleFileAddSuccess"
+            :on-error="handleUploadError"
+            accept=".pdf,.docx,.txt,.csv,.md,.png,.jpg,.jpeg"
+          >
+            <el-button type="primary" icon="Plus" v-hasPermi="['expert:material:add']">
+              增加文件
+            </el-button>
+          </el-upload>
+        </div>
+        <el-table :data="versionFiles" border empty-text="当前版本暂无文件">
+          <el-table-column type="index" label="序号" width="60" align="center" />
+          <el-table-column label="文件名称" prop="fileName" min-width="260" show-overflow-tooltip />
+          <el-table-column label="类型" prop="fileType" width="80" align="center" />
+          <el-table-column label="大小" width="110">
+            <template #default="{ row }">{{ formatFileSize(row.fileSize) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" align="center">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="handleVersionFilePreview(row)">预览</el-button>
+              <el-button
+                link
+                type="danger"
+                :disabled="versionFiles.length <= 1"
+                @click="handleDeleteVersionFile(row)"
+                v-hasPermi="['expert:material:add']"
+              >删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="fileDrawerOpen = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :loading="fileSubmitting"
+          :disabled="!fileDirty || versionFiles.length === 0"
+          @click="saveVersionFiles"
+        >
+          保存并提交审核
+        </el-button>
+      </template>
+    </el-drawer>
   </div>
 </template>
 
 <script setup name="ExpertMaterials">
 import { getToken } from "@/utils/auth"
 import {
+  addExpertMaterialFile,
+  deleteExpertMaterialFile,
   getExpertCertifications,
+  getQualificationReminders,
   listExpertMaterials,
-  previewExpertMaterial,
+  listExpertMaterialFiles,
+  previewExpertMaterialFile,
   retryExpertMaterial,
-  submitExpertMaterial
+  submitExpertMaterial,
+  submitExpertMaterialRevision
 } from "@/api/expert/platform"
 
 const { proxy } = getCurrentInstance()
@@ -189,10 +300,23 @@ const previewKind = ref("")
 const previewUrl = ref("")
 const previewText = ref("")
 const previewTitle = ref("材料预览")
+const fileDrawerOpen = ref(false)
+const fileLoading = ref(false)
+const fileSubmitting = ref(false)
+const fileAngle = ref({})
+const baseVersionFiles = ref([])
+const versionFiles = ref([])
+const pendingAdditions = ref([])
+const pendingDeletions = ref([])
+const submitRetryNeeded = ref(false)
+const qualificationReminders = ref([])
 let timer
 const uploadAction = import.meta.env.VITE_APP_BASE_API + "/expert/workspace/materials/upload"
 const uploadHeaders = computed(() => ({ Authorization: "Bearer " + getToken() }))
 const queryParams = reactive({ pageNum: 1, pageSize: 10 })
+const fileDirty = computed(() => pendingAdditions.value.length > 0
+  || pendingDeletions.value.length > 0
+  || submitRetryNeeded.value)
 const certPercentage = computed(() => {
   const totalRequired = Number(certifications.value.requiredTotal || 0)
   return totalRequired ? Math.round(Number(certifications.value.passedRequired || 0) * 100 / totalRequired) : 0
@@ -222,11 +346,11 @@ function getList() {
     })
 }
 
-function beforeUpload(file) {
+function beforeUpload(file, angle) {
   const allowed = ["pdf", "docx", "txt", "csv", "md", "png", "jpg", "jpeg"]
   const ext = file.name.split(".").pop().toLowerCase()
   if (!allowed.includes(ext)) {
-    proxy.$modal.msgError("仅支持 PDF、Word 和图片文件")
+    proxy.$modal.msgError("仅支持 PDF、Word、文本和图片文件")
     return false
   }
   if (file.size > 10 * 1024 * 1024) {
@@ -236,33 +360,144 @@ function beforeUpload(file) {
   return true
 }
 
-function handleUploadSuccess(response, file, categoryCode) {
+function handleUploadSuccess(response, file, angle) {
   if (response.code !== 200) {
     proxy.$modal.msgError(response.msg || "文件上传失败")
     return
   }
   submitExpertMaterial({
+    materialId: angle.materialId || undefined,
     fileName: response.fileName || file.name,
     filePath: response.filePath,
-    fileSize: file.size,
-    materialCategory: categoryCode
-  }).then(() => {
-    proxy.$modal.msgSuccess("资料已提交，正在进入处理队列")
+    fileSize: response.fileSize || file.size,
+    materialCategory: angle.categoryCode
+  }).then(saved => {
+    const versionNo = saved.data?.versionNo
+    const isFirstUpload = !angle.materialId
+    proxy.$modal.msgSuccess(isFirstUpload
+      ? `材料已创建为 V${versionNo || 1}，正在进入处理队列`
+      : `文件已加入原版本 V${versionNo}，正在重新审核`)
     getList()
     loadCertifications()
   })
+}
+
+function openFileDrawer(angle) {
+  fileAngle.value = angle
+  fileDrawerOpen.value = true
+  pendingAdditions.value = []
+  pendingDeletions.value = []
+  submitRetryNeeded.value = false
+  loadVersionFiles()
+}
+
+function loadVersionFiles() {
+  if (!fileAngle.value.materialId) return
+  fileLoading.value = true
+  return listExpertMaterialFiles(fileAngle.value.materialId)
+    .then(res => {
+      baseVersionFiles.value = res.data || []
+      rebuildVersionFiles()
+    })
+    .finally(() => {
+      fileLoading.value = false
+    })
+}
+
+function rebuildVersionFiles() {
+  const deleted = new Set(pendingDeletions.value)
+  versionFiles.value = [
+    ...baseVersionFiles.value.filter(file => !deleted.has(file.fileId)),
+    ...pendingAdditions.value
+  ]
+}
+
+function handleFileAddSuccess(response, file) {
+  if (response.code !== 200) {
+    proxy.$modal.msgError(response.msg || "文件上传失败")
+    return
+  }
+  pendingAdditions.value.push({
+    fileId: -Date.now(),
+    pending: true,
+    fileName: response.fileName || file.name,
+    filePath: response.filePath,
+    fileSize: response.fileSize || file.size,
+    fileType: String(response.fileName || file.name).split(".").pop().toLowerCase()
+  })
+  rebuildVersionFiles()
+  proxy.$modal.msgSuccess("文件已暂存，点击“保存并提交审核”后生效")
+}
+
+function handleDeleteVersionFile(file) {
+  proxy.$modal.confirm(`确认从当前版本删除“${file.fileName}”吗？`)
+    .then(() => {
+      if (file.pending) {
+        pendingAdditions.value = pendingAdditions.value
+          .filter(item => item.fileId !== file.fileId)
+      }
+      else if (!pendingDeletions.value.includes(file.fileId)) {
+        pendingDeletions.value.push(file.fileId)
+      }
+      rebuildVersionFiles()
+      proxy.$modal.msgSuccess("文件删除已暂存，点击“保存并提交审核”后生效")
+    })
+    .catch(() => {})
+}
+
+async function saveVersionFiles() {
+  if (!fileDirty.value || versionFiles.value.length === 0) return
+  fileSubmitting.value = true
+  try {
+    for (const file of [...pendingAdditions.value]) {
+      await addExpertMaterialFile(fileAngle.value.materialId, {
+        fileName: file.fileName,
+        filePath: file.filePath,
+        fileSize: file.fileSize
+      })
+      pendingAdditions.value = pendingAdditions.value
+        .filter(item => item.fileId !== file.fileId)
+    }
+    for (const fileId of [...pendingDeletions.value]) {
+      await deleteExpertMaterialFile(fileAngle.value.materialId, fileId)
+      pendingDeletions.value = pendingDeletions.value.filter(id => id !== fileId)
+    }
+    await submitExpertMaterialRevision(fileAngle.value.materialId)
+    proxy.$modal.msgSuccess(`当前版本已提交审核，共 ${versionFiles.value.length} 份文件`)
+    fileDrawerOpen.value = false
+    pendingAdditions.value = []
+    pendingDeletions.value = []
+    submitRetryNeeded.value = false
+    getList()
+    loadCertifications()
+  }
+  catch {
+    if (pendingAdditions.value.length === 0 && pendingDeletions.value.length === 0) {
+      submitRetryNeeded.value = true
+    }
+    await loadVersionFiles()
+  }
+  finally {
+    fileSubmitting.value = false
+  }
 }
 
 function loadCertifications() {
   getExpertCertifications().then(res => {
     certifications.value = res.data || { angles: [] }
   })
+  getQualificationReminders().then(res => {
+    qualificationReminders.value = res.data || []
+  })
 }
 
 function angleTagType(status) {
   return {
     APPROVED: "success",
+    EXPIRING_SOON: "warning",
+    EXPIRED: "danger",
     IN_REVIEW: "warning",
+    UPDATE_RETURNED: "warning",
     NEEDS_UPDATE: "danger"
   }[status] || "info"
 }
@@ -270,16 +505,18 @@ function angleTagType(status) {
 function certificationClass(status) {
   return {
     APPROVED: "angle-approved",
+    EXPIRING_SOON: "angle-reviewing",
+    EXPIRED: "angle-rejected",
     IN_REVIEW: "angle-reviewing",
+    UPDATE_RETURNED: "angle-reviewing",
     NEEDS_UPDATE: "angle-rejected"
   }[status] || "angle-empty"
 }
 
 function angleButtonText(angle) {
   if (!angle.materialId) return "上传材料"
-  if (angle.certificationStatus === "APPROVED") return "更新材料"
-  if (angle.certificationStatus === "NEEDS_UPDATE") return "重新上传"
-  return "替换材料"
+  if (["NEEDS_UPDATE", "EXPIRED"].includes(angle.certificationStatus)) return "更新资质材料"
+  return "更新原文件版本"
 }
 
 function handleUploadError() {
@@ -298,30 +535,35 @@ function showDetail(row) {
   detailOpen.value = true
 }
 
-async function handlePreview(row) {
+async function showPreviewBlob(blob, fileType, textMode) {
+  if (textMode) {
+    previewKind.value = "text"
+    previewText.value = await blob.text()
+  }
+  else if (["png", "jpg", "jpeg", "gif", "webp"].includes(fileType)) {
+    previewKind.value = "image"
+    previewUrl.value = URL.createObjectURL(blob)
+  }
+  else if (fileType === "pdf") {
+    previewKind.value = "pdf"
+    previewUrl.value = URL.createObjectURL(blob)
+  }
+  else {
+    previewKind.value = "unsupported"
+  }
+}
+
+async function handleVersionFilePreview(file) {
   clearPreview()
   previewLoading.value = true
   previewOpen.value = true
-  previewTitle.value = row.fileName || "材料预览"
-  const fileType = String(row.fileType || "").toLowerCase()
+  previewTitle.value = file.fileName || "版本文件预览"
+  const fileType = String(file.fileType || "").toLowerCase()
   const textMode = ["docx", "txt", "md", "csv"].includes(fileType)
   try {
-    const blob = await previewExpertMaterial(row.materialId, textMode ? "text" : "raw")
-    if (textMode) {
-      previewKind.value = "text"
-      previewText.value = await blob.text()
-    }
-    else if (["png", "jpg", "jpeg", "gif", "webp"].includes(fileType)) {
-      previewKind.value = "image"
-      previewUrl.value = URL.createObjectURL(blob)
-    }
-    else if (fileType === "pdf") {
-      previewKind.value = "pdf"
-      previewUrl.value = URL.createObjectURL(blob)
-    }
-    else {
-      previewKind.value = "unsupported"
-    }
+    const blob = await previewExpertMaterialFile(fileAngle.value.materialId, file.fileId,
+      textMode ? "text" : "raw")
+    await showPreviewBlob(blob, fileType, textMode)
   }
   catch {
     previewKind.value = "unsupported"
@@ -340,33 +582,52 @@ function clearPreview() {
   previewKind.value = ""
 }
 
+function formatFileSize(size) {
+  const value = Number(size || 0)
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function validityRemainingText(item) {
+  if (!item?.validUntil) return "审核通过后自动生成，有效期3个月"
+  const expiryText = String(item.validUntil).slice(0, 10)
+  const expiry = new Date(`${expiryText}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const remainingDays = Math.ceil((expiry.getTime() - today.getTime()) / 86400000)
+  if (remainingDays < 0) {
+    return `有效期至 ${expiryText} · 已过期 ${Math.abs(remainingDays)} 天`
+  }
+  if (remainingDays === 0) return `有效期至 ${expiryText} · 今天到期`
+  return `有效期至 ${expiryText} · 剩余 ${remainingDays} 天`
+}
+
 function categoryText(value) {
   return {
     IDENTITY: "身份证明",
     QUALIFICATION: "学历职称",
     CERTIFICATE: "职业资格",
     ACHIEVEMENT: "代表成果",
-    OTHER: "其他材料"
+    SERVICE_EXPERIENCE: "服务经历",
+    OTHER: "利益冲突说明"
   }[value] || value
 }
 
 function jobStatusText(value) {
+  if (["QUEUED", "EXTRACTING", "MASKING", "MAPPING", "PRE_REVIEWING",
+    "REVIEW_PENDING", "PRE_REVIEW_PASSED"].includes(value)) {
+    return "已提交审核"
+  }
   return {
-    QUEUED: "排队中",
-    EXTRACTING: "提取中",
-    MASKING: "脱敏中",
-    MAPPING: "映射中",
-    PRE_REVIEWING: "初审中",
-    REVIEW_PENDING: "等待人工审核",
-    PRE_REVIEW_PASSED: "等待人工审核",
-    REVIEWED: "处理已完成",
+    REVIEWED: "审核完毕",
     FAILED: "处理失败"
   }[value] || value
 }
 
 function jobTagType(value) {
   if (value === "FAILED") return "danger"
-  if (value === "REVIEW_PENDING" || value === "PRE_REVIEW_PASSED") return "success"
+  if (value === "REVIEWED") return "success"
   return "warning"
 }
 
@@ -419,6 +680,9 @@ loadCertifications()
   > div:first-child {
     flex: 1;
   }
+}
+.qualification-alert {
+  margin-bottom: 12px;
 }
 .cert-progress {
   display: flex;
@@ -478,12 +742,24 @@ loadCertifications()
     line-height: 1.6;
   }
 }
+.validity-field {
+  margin-bottom: 12px;
+}
+.validity-summary {
+  color: #b57916 !important;
+}
 .material-list {
   margin-top: 16px;
 }
 .review-comment {
   color: #b25b5b;
   line-height: 1.6;
+}
+.version-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 .issue-count {
   display: inline-block;
@@ -524,5 +800,16 @@ loadCertifications()
   white-space: pre-wrap;
   word-break: break-word;
   background: #fff;
+}
+.file-maintainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #5f6f7c;
 }
 </style>

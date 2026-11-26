@@ -30,13 +30,12 @@ public class ExpertGraphService
         {
             return false;
         }
-        // 正式画像只能由当前有效、已审核的图谱声明生成。
+        // 正式画像只能由当前有效、已审核的独立材料维度评估生成。
         dimensionAggregationService.rebuildDraft(profile, true);
-        int expectedDimensions = platformMapper.countEnabledGraphDimensions();
         int draftDimensions = platformMapper.countDraftGraph(userId);
-        if (expectedDimensions == 0 || draftDimensions < expectedDimensions)
+        if (draftDimensions == 0)
         {
-            // 缺失维度代表证据不足，不允许把残缺画像发布为正式版本。
+            // 没有任何有效维度时没有画像内容可发布；部分维度有分数时可以发布部分画像。
             return false;
         }
         platformMapper.incrementGraphVersion(userId);
@@ -44,7 +43,13 @@ public class ExpertGraphService
         int approved = platformMapper.approveDraftGraph(userId);
         if (approved > 0)
         {
+            platformMapper.deleteApprovedDimensionEvidence(userId);
             platformMapper.approveDraftGraphEvidence(userId);
+            // 保留一份与最新已审核材料同步的当前草稿，供检索和页面读取；
+            // APPROVED 记录仍是不可被后续编辑覆盖的正式历史版本。
+            profile.setGraphVersion((profile.getGraphVersion() == null ? 0
+                    : profile.getGraphVersion()) + 1);
+            dimensionAggregationService.rebuildDraft(profile, true);
         }
         return approved > 0;
     }

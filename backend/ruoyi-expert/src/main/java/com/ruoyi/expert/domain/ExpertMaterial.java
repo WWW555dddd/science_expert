@@ -27,6 +27,10 @@ public class ExpertMaterial extends BaseEntity
     private String agentMessage;
     private String reviewComment;
     private String latestSubmitTime;
+    private String effectiveFlag;
+    private Integer fileCount;
+    private String validFrom;
+    private String validUntil;
 
     public Long getMaterialId()
     {
@@ -198,5 +202,45 @@ public class ExpertMaterial extends BaseEntity
     public void setLatestSubmitTime(String latestSubmitTime)
     {
         this.latestSubmitTime = latestSubmitTime;
+    }
+
+    public String getEffectiveFlag()
+    {
+        return effectiveFlag;
+    }
+
+    public void setEffectiveFlag(String effectiveFlag)
+    {
+        this.effectiveFlag = effectiveFlag;
+    }
+
+    public Integer getFileCount()
+    {
+        return fileCount;
+    }
+
+    public void setFileCount(Integer fileCount)
+    {
+        this.fileCount = fileCount;
+    }
+
+    public String getValidFrom()
+    {
+        return validFrom;
+    }
+
+    public void setValidFrom(String validFrom)
+    {
+        this.validFrom = validFrom;
+    }
+
+    public String getValidUntil()
+    {
+        return validUntil;
+    }
+
+    public void setValidUntil(String validUntil)
+    {
+        this.validUntil = validUntil;
     }
 }

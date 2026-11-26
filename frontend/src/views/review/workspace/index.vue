@@ -6,9 +6,14 @@
         <h2>专家审核工作台</h2>
         <p>查看模型或规则初审结果，逐份核验认证材料并完成审核决定。</p>
       </div>
-      <el-button type="primary" size="large" icon="List" @click="go('/review-center/queue')">
-        进入审核队列
-      </el-button>
+      <div class="hero-actions">
+        <el-button type="primary" size="large" icon="List" @click="go('/review-center/queue')">
+          进入审核队列
+        </el-button>
+        <el-button size="large" icon="Switch" @click="go('/review-center/status-review')">
+          专家状态与信誉申请 {{ summary.pendingStatusRequestCount || 0 }}
+        </el-button>
+      </div>
     </div>
     <el-row :gutter="16">
       <el-col :xs="12" :sm="6">
@@ -59,6 +64,14 @@
         <el-table-column label="操作" width="110">
           <template #default="{ row }">
             <el-button v-if="row.jobStatus === 'FAILED'" link type="warning" @click="retry(row)">重试</el-button>
+            <el-button
+              v-else-if="['REVIEW_PENDING', 'PRE_REVIEW_PASSED'].includes(row.jobStatus)"
+              link
+              type="primary"
+              @click="review(row)"
+            >
+              去审核
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -95,6 +108,13 @@ function retry(row) {
   retryAgentJob(row.materialId).then(() => {
     proxy.$modal.msgSuccess("处理任务已重新排队")
     loadData()
+  })
+}
+
+function review(row) {
+  router.push({
+    path: "/review-center/queue",
+    query: { userId: row.userId, materialId: row.materialId }
   })
 }
 
@@ -152,6 +172,10 @@ loadData()
     font-size: 12px;
     letter-spacing: 2px;
     opacity: .7;
+  }
+  .hero-actions {
+    display: flex;
+    gap: 10px;
   }
 }
 .stat {

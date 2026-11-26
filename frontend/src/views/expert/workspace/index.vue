@@ -4,7 +4,7 @@
       <div>
         <span class="eyebrow">EXPERT WORKSPACE</span>
         <h2>{{ profile.realName || nickName }}，欢迎进入专家工作台</h2>
-        <p>维护专家档案与认证材料，查看能力画像、认证进度和接单状态。</p>
+        <p>维护专家档案与认证材料，查看能力画像、审核反馈、认证进度和接单状态。</p>
       </div>
       <el-tag :type="reviewTagType" effect="dark" size="large">
         {{ reviewStatusText }}
@@ -30,7 +30,7 @@
         <el-card shadow="never" class="metric-card">
           <span>已上传资料</span>
           <strong>{{ summary.materialCount || 0 }}</strong>
-          <small>包含历史版本</small>
+          <small>按认证角度归档</small>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
@@ -57,8 +57,8 @@
               <el-tag v-if="graph.profileKind === 'LEGACY_PROFILE'" type="warning" effect="plain">
                 旧版评分画像
               </el-tag>
-              <el-tag v-else-if="graph.profileKind === 'GRAPH_PROFILE'" type="success" effect="plain">
-                知识图谱驱动
+              <el-tag v-else-if="graph.profileKind === 'EVIDENCE_SCORE'" type="success" effect="plain">
+                独立30维画像
               </el-tag>
             </div>
           </template>
@@ -111,7 +111,7 @@
             </el-row>
             <div class="ai-card-footer">
               <span>分析依据：专家档案、认证材料、审核结果与30维能力标签</span>
-              <el-button type="primary" plain @click="go('/expert-center/graph')">查看完整30维画像</el-button>
+              <el-button type="primary" plain @click="go('/expert-center/graph')">查看当前30维画像</el-button>
             </div>
           </template>
         </el-card>
@@ -136,11 +136,110 @@
         </el-card>
       </el-col>
     </el-row>
+
+    <el-row :gutter="16" class="feedback-row">
+      <el-col :xs="24" :lg="12">
+        <el-card shadow="never" class="feedback-card">
+          <template #header>
+            <div class="feedback-header">
+              <div>
+                <strong>已审核画像评价</strong>
+                <small>管理员批准后生成本人的画像发布记录</small>
+              </div>
+              <el-tag type="success" effect="plain">{{ profileReviews.length }} 条</el-tag>
+            </div>
+          </template>
+          <el-empty
+            v-if="!profileReviews.length"
+            description="暂无已通过的画像评价"
+            :image-size="70"
+          />
+          <div v-else class="feedback-list">
+            <article
+              v-for="item in profileReviews"
+              :key="item.suggestionId"
+              class="feedback-item profile-review-item"
+            >
+              <div class="feedback-item-head">
+                <div>
+                  <el-tag type="success" size="small">管理员已批准</el-tag>
+                  <strong>{{ formatDateTime(item.resolvedTime) }}</strong>
+                </div>
+                <span v-if="item.releaseId">画像发布 #{{ item.releaseId }}</span>
+              </div>
+              <p>{{ item.summary || "本次评价已通过审核并计入画像发布版本。" }}</p>
+              <div class="dimension-tags">
+                <el-tag
+                  v-for="dimension in item.items || []"
+                  :key="dimension.itemId"
+                  type="info"
+                  effect="plain"
+                >
+                  {{ dimension.dimensionName }}
+                  <b>{{ approvedScore(dimension) }}</b>
+                </el-tag>
+              </div>
+              <small>
+                审核人：{{ item.reviewerName || "管理员" }}
+                <template v-if="item.reviewComment"> · 审核说明：{{ item.reviewComment }}</template>
+              </small>
+            </article>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :lg="12">
+        <el-card shadow="never" class="feedback-card">
+          <template #header>
+            <div class="feedback-header">
+              <div>
+                <strong>已确认风险预警</strong>
+                <small>仅展示管理员审核确认的风险记录</small>
+              </div>
+              <el-tag type="warning" effect="plain">{{ riskAlerts.length }} 条</el-tag>
+            </div>
+          </template>
+          <el-empty
+            v-if="!riskAlerts.length"
+            description="暂无已确认的风险预警"
+            :image-size="70"
+          />
+          <div v-else class="feedback-list">
+            <article
+              v-for="risk in riskAlerts"
+              :key="risk.riskId"
+              class="feedback-item risk-feedback-item"
+            >
+              <div class="feedback-item-head">
+                <div>
+                  <el-tag :type="riskSeverityTag(risk.severity)" size="small">
+                    {{ riskSeverityText(risk.severity) }}
+                  </el-tag>
+                  <strong>{{ risk.title || "风险预警" }}</strong>
+                </div>
+                <span>{{ riskTypeText(risk.riskType) }}</span>
+              </div>
+              <p>{{ risk.summary || "该风险预警已由管理员确认。" }}</p>
+              <div class="risk-meta">
+                <span>发生时间：{{ formatDateTime(risk.occurredAt) }}</span>
+                <span>审核人：{{ risk.reviewerName || "管理员" }}</span>
+                <span>确认时间：{{ formatDateTime(risk.resolvedTime) }}</span>
+              </div>
+              <small v-if="risk.reviewComment">审核说明：{{ risk.reviewComment }}</small>
+            </article>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
   </div>
 </template>
 
 <script setup name="ExpertWorkspace">
-import { getExpertGraph, getExpertSummary } from "@/api/expert/platform"
+import {
+  getExpertGraph,
+  getExpertSummary,
+  getMyProfileReviews,
+  getMyRiskAlerts
+} from "@/api/expert/platform"
 import useUserStore from "@/store/modules/user"
 
 const router = useRouter()
@@ -148,6 +247,8 @@ const userStore = useUserStore()
 const loading = ref(false)
 const summary = ref({})
 const graph = ref({ dimensions: [] })
+const profileReviews = ref([])
+const riskAlerts = ref([])
 const nickName = computed(() => userStore.nickName || userStore.name)
 const profile = computed(() => summary.value.profile || {})
 const completionPercentage = computed(() =>
@@ -220,12 +321,53 @@ function go(path) {
   router.push(path)
 }
 
+function formatDateTime(value) {
+  if (!value) return "时间未记录"
+  return String(value).replace("T", " ").slice(0, 16)
+}
+
+function approvedScore(item) {
+  const score = item.approvedScore ?? item.suggestedScore
+  return score == null ? "未评分" : `${Math.round(Number(score))} 分`
+}
+
+function riskTypeText(value) {
+  return {
+    COMPLAINT: "投诉",
+    LOW_EVALUATION: "低评价",
+    CREDIT_WARNING: "信用预警"
+  }[value] || value || "风险预警"
+}
+
+function riskSeverityText(value) {
+  return {
+    LOW: "低风险",
+    MEDIUM: "中风险",
+    HIGH: "高风险"
+  }[value] || value || "风险"
+}
+
+function riskSeverityTag(value) {
+  return {
+    LOW: "info",
+    MEDIUM: "warning",
+    HIGH: "danger"
+  }[value] || "warning"
+}
+
 function loadData() {
   loading.value = true
-  Promise.all([getExpertSummary(), getExpertGraph()])
-    .then(([summaryRes, graphRes]) => {
+  Promise.all([
+    getExpertSummary(),
+    getExpertGraph(),
+    getMyProfileReviews(),
+    getMyRiskAlerts()
+  ])
+    .then(([summaryRes, graphRes, profileReviewRes, riskAlertRes]) => {
       summary.value = summaryRes.data || {}
       graph.value = graphRes.data || { dimensions: [] }
+      profileReviews.value = profileReviewRes.data || []
+      riskAlerts.value = riskAlertRes.data || []
     })
     .finally(() => {
       loading.value = false
@@ -405,6 +547,94 @@ loadData()
       height: 44px;
       margin-left: 0;
     }
+  }
+  .feedback-row {
+    margin-top: 16px;
+  }
+  .feedback-card {
+    height: 100%;
+    margin-bottom: 16px;
+  }
+  .feedback-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    > div {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    strong {
+      color: #17324d;
+      font-size: 16px;
+    }
+    small {
+      color: #7b8794;
+      font-weight: 400;
+    }
+  }
+  .feedback-list {
+    display: flex;
+    max-height: 520px;
+    flex-direction: column;
+    gap: 12px;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .feedback-item {
+    padding: 14px;
+    border: 1px solid #e3eaef;
+    border-radius: 10px;
+    background: #fbfcfd;
+    p {
+      margin: 10px 0;
+      color: #526575;
+      line-height: 1.75;
+    }
+    small {
+      color: #7b8794;
+      line-height: 1.7;
+    }
+  }
+  .feedback-item-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    > div {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    strong {
+      color: #243f54;
+      font-size: 14px;
+    }
+    > span {
+      flex: 0 0 auto;
+      color: #7b8794;
+      font-size: 12px;
+    }
+  }
+  .dimension-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 10px;
+    b {
+      margin-left: 4px;
+      color: #1f6d5b;
+    }
+  }
+  .risk-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin-bottom: 8px;
+    color: #7b8794;
+    font-size: 12px;
   }
 }
 </style>

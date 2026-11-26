@@ -1,0 +1,127 @@
+{
+  "version": "expert-domain-v3",
+  "displayName": "科技保险专家检索图谱 V3",
+  "publishedAt": "2026-11-18",
+  "allowedEvidenceSources": [
+    "MATERIAL",
+    "EXPERT_PROFILE",
+    "SERVICE_LOG",
+    "MANUAL"
+  ],
+  "entities": {
+    "Industry": {
+      "description": "图谱中心节点，表示专家服务或任务所属产业",
+      "requiredProperties": ["name"]
+    },
+    "Expert": {
+      "description": "平台认证或无档案专家实体",
+      "requiredProperties": ["userId"]
+    },
+    "Organization": {
+      "description": "专家所属单位或协作单位",
+      "requiredProperties": ["name"]
+    },
+    "Credential": {
+      "description": "学历、职称或职业资格",
+      "requiredProperties": ["name"]
+    },
+    "Capability": {
+      "description": "材料中可检索的具体技术或服务能力，不使用30维画像定义生成",
+      "requiredProperties": ["name"]
+    },
+    "Project": {
+      "description": "专家参与的科研、工程或服务项目",
+      "requiredProperties": ["name"]
+    },
+    "Achievement": {
+      "description": "论文、专利、标准、软著或代表性成果",
+      "requiredProperties": ["name"]
+    },
+    "Technology": {
+      "description": "项目、成果或服务使用的技术方法",
+      "requiredProperties": ["name"]
+    },
+    "ServiceRegion": {
+      "description": "专家可提供服务的行政或业务区域",
+      "requiredProperties": ["name"]
+    },
+    "Task": {
+      "description": "待匹配的科技保险服务需求",
+      "requiredProperties": ["title"]
+    }
+  },
+  "relations": {
+    "HAS_EXPERT": {
+      "from": ["Industry"],
+      "to": ["Expert"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "BELONGS_TO": {
+      "from": ["Expert"],
+      "to": ["Organization"],
+      "cardinality": "N:1",
+      "evidenceRequired": true
+    },
+    "HAS_CREDENTIAL": {
+      "from": ["Expert"],
+      "to": ["Credential"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "EXPERTISE_IN": {
+      "from": ["Expert"],
+      "to": ["Capability"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "SERVES_REGION": {
+      "from": ["Expert"],
+      "to": ["ServiceRegion"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "PARTICIPATED_IN": {
+      "from": ["Expert"],
+      "to": ["Project"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "PRODUCED": {
+      "from": ["Expert"],
+      "to": ["Achievement"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "PROJECT_PRODUCED": {
+      "from": ["Project"],
+      "to": ["Achievement"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "USES_TECHNOLOGY": {
+      "from": ["Project"],
+      "to": ["Technology"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "APPLIES_TO": {
+      "from": ["Technology"],
+      "to": ["Industry"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "TARGETS_INDUSTRY": {
+      "from": ["Task"],
+      "to": ["Industry"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    },
+    "REQUIRES_CAPABILITY": {
+      "from": ["Task"],
+      "to": ["Capability"],
+      "cardinality": "N:N",
+      "evidenceRequired": true
+    }
+  }
+}

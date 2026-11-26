@@ -8,6 +8,9 @@
       </div>
       <div class="head-actions">
         <el-tag effect="plain">共 {{ total }} 个专家账号</el-tag>
+        <el-button icon="Share" v-hasPermi="['expert:admin:view']" @click="openOverviewGraph">
+          全体知识图谱
+        </el-button>
         <el-button type="primary" icon="Plus" v-hasPermi="['expert:admin:expert:edit']" @click="openCreate">
           新增专家档案
         </el-button>
@@ -47,6 +50,7 @@
           <el-option label="正常接单" value="AVAILABLE" />
           <el-option label="暂停接单" value="PAUSED" />
           <el-option label="待认证" value="PENDING_CERTIFICATION" />
+          <el-option label="禁止接单" value="CREDIT_BLOCKED" />
           <el-option label="已退出" value="EXITED" />
         </el-select>
       </el-form-item>
@@ -110,6 +114,13 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="信誉分" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :type="Number(row.creditScore ?? 100) < 60 ? 'danger' : 'success'" size="small">
+              {{ row.creditScore ?? 100 }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="资料 / 时间表" width="120" align="center">
           <template #default="{ row }">
             <span>{{ row.materialCount || 0 }} 份</span>
@@ -130,7 +141,7 @@
         <el-table-column label="最近提交" prop="latestSubmitTime" width="170">
           <template #default="{ row }">{{ row.latestSubmitTime || "尚未提交" }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="285" fixed="right">
+        <el-table-column label="操作" width="335" fixed="right">
           <template #default="{ row }">
             <el-button
               v-if="row.profileId"
@@ -150,6 +161,15 @@
               @click="openKnowledgeGraph(row)"
             >
               图谱
+            </el-button>
+            <el-button
+              v-if="row.profileId"
+              link
+              type="primary"
+              icon="Clock"
+              @click="openVersionHistory(row)"
+            >
+              版本
             </el-button>
             <el-button
               link
@@ -197,6 +217,29 @@
         show-icon
         class="dialog-alert"
       />
+      <div class="word-import-bar">
+        <div>
+          <strong>Word模板导入</strong>
+          <span>下载标准模板填写专家基本信息；导入后回填当前表单，确认无误后再保存。</span>
+        </div>
+        <div class="word-import-actions">
+          <el-button plain icon="Download" @click="downloadWordTemplate">下载模板</el-button>
+          <el-upload
+            :action="wordImportAction"
+            :headers="uploadHeaders"
+            :show-file-list="false"
+            accept=".docx"
+            :before-upload="beforeWordImport"
+            :on-success="handleWordImportSuccess"
+            :on-error="handleWordImportError"
+            v-hasPermi="['expert:admin:expert:edit']"
+          >
+            <el-button type="primary" plain icon="Upload" :loading="wordImporting">
+              导入Word模板
+            </el-button>
+          </el-upload>
+        </div>
+      </div>
       <el-form ref="profileRef" :model="profileForm" :rules="rules" label-width="92px">
         <el-form-item v-if="dialogMode === 'create'" label="专家账号" prop="userId">
           <el-select
@@ -268,6 +311,7 @@
                 <el-option label="正常接单" value="AVAILABLE" />
                 <el-option label="暂停接单" value="PAUSED" />
                 <el-option label="待认证（通过后自动开放）" value="PENDING_CERTIFICATION" disabled />
+                <el-option label="禁止接单（信誉低于阈值）" value="CREDIT_BLOCKED" />
                 <el-option label="退出专家库" value="EXITED" />
               </el-select>
               <div v-if="serviceStatusLocked" class="status-lock-tip">
@@ -289,6 +333,24 @@
         </el-row>
       </el-form>
 
+      <div class="admin-schedule-section" v-loading="scheduleLoading">
+        <div class="material-heading">
+          <div>
+            <h3>日常可联系时段</h3>
+            <p>维护专家固定周联系安排、服务方式和每周承接上限；临时不可用时段单独展示。</p>
+          </div>
+          <el-tag type="info" effect="plain">{{ adminSchedules.length }} 个时段</el-tag>
+        </div>
+        <el-empty v-if="!profileForm.userId" description="请先选择专家账号" :image-size="70" />
+        <ExpertScheduleGantt v-else v-model="adminSchedules" />
+      </div>
+      <ExpertUnavailablePeriods
+        v-if="profileForm.userId"
+        mode="admin"
+        :user-id="profileForm.userId"
+        readonly
+      />
+
       <div class="admin-material-section" v-loading="certificationLoading">
         <div class="material-heading">
           <div>
@@ -300,7 +362,7 @@
           </el-tag>
         </div>
         <el-alert
-          title="已有“已认证”材料可以沿用；未认证角度需要由管理员重新上传。保存后自动进入字段提取、脱敏和画像分析。"
+          title="已有“已认证”材料可以沿用；未认证角度需要由管理员重新上传。保存后自动进入基本信息提取、脱敏和画像分析。"
           type="info"
           :closable="false"
           show-icon
@@ -331,7 +393,12 @@
               </template>
               <template v-else-if="angle.materialId">
                 <span>{{ angle.fileName }}</span>
-                <small>V{{ angle.versionNo }} · {{ materialReviewStatusText(angle.reviewStatus) }}</small>
+                <small>
+                  V{{ angle.versionNo }} · {{ materialReviewStatusText(angle.reviewStatus) }}
+                  <template v-if="angle.validityRequired === '1'">
+                    · {{ adminValidityRemainingText(angle) }}
+                  </template>
+                </small>
               </template>
               <span v-else>尚未上传该角度材料</span>
             </div>
@@ -390,8 +457,8 @@
             <el-tag v-if="adminGraph.profileKind === 'LEGACY_PROFILE'" type="warning" effect="plain">
               旧版评分画像
             </el-tag>
-            <el-tag v-else-if="adminGraph.profileKind === 'GRAPH_PROFILE'" type="success" effect="plain">
-              知识图谱驱动
+            <el-tag v-else-if="adminGraph.profileKind === 'EVIDENCE_SCORE'" type="success" effect="plain">
+              独立30维画像
             </el-tag>
             <strong>V{{ adminGraph.graphVersion || 0 }}</strong>
             <span>平均分 {{ graphAverage }}</span>
@@ -441,8 +508,7 @@
               />
               <small v-if="dimension.dataStatus !== 'INSUFFICIENT_EVIDENCE'">
                 置信度 {{ Math.round(Number(dimension.confidence || 0) * 100) }}%
-                · {{ dimension.sourceCount || 0 }} 份证据
-                · {{ dimension.graphPathCount || 0 }} 条图谱路径
+                · {{ dimension.sourceCount || 0 }} 份材料证据
               </small>
               <small v-else>不生成占位分</small>
             </div>
@@ -451,6 +517,55 @@
       </div>
       <template #footer>
         <el-button @click="graphDrawerOpen = false">关闭</el-button>
+      </template>
+    </el-drawer>
+
+    <el-drawer
+      v-model="overviewGraphOpen"
+      title="全体专家知识图谱"
+      size="86%"
+      destroy-on-close
+    >
+      <div v-loading="overviewGraphLoading">
+        <el-descriptions :column="4" border>
+          <el-descriptions-item label="专家数">{{ overviewGraph.expertCount || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="行业数">{{ overviewGraph.industryCount || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="实体数">{{ overviewGraph.entityCount || 0 }}</el-descriptions-item>
+          <el-descriptions-item label="关系数">{{ overviewGraph.relationCount || 0 }}</el-descriptions-item>
+        </el-descriptions>
+
+        <el-alert
+          :title="`跨专家共享实体 ${overviewGraph.sharedEntityCount || 0} 个，可用于观察行业聚合、共同项目和共同能力等群体关系。`"
+          type="info"
+          :closable="false"
+          show-icon
+          class="overview-graph-tip"
+        />
+
+        <div v-if="overviewGraph.industryGroups?.length" class="industry-groups">
+          <span>行业分布</span>
+          <el-tag
+            v-for="item in overviewGraph.industryGroups"
+            :key="item.industryEntityId"
+            effect="plain"
+          >
+            {{ item.industryName }} · {{ item.expertCount }} 位专家
+          </el-tag>
+        </div>
+
+        <el-empty
+          v-if="!overviewGraph.entities?.length"
+          description="当前还没有可展示的全专家知识图谱数据"
+        />
+        <el-card v-else shadow="never" header="行业—专家—关键事实群体关系" class="detail-block">
+          <KnowledgeGraphSvg
+            :entities="overviewGraph.entities || []"
+            :relations="overviewGraph.relations || []"
+          />
+        </el-card>
+      </div>
+      <template #footer>
+        <el-button @click="overviewGraphOpen = false">关闭</el-button>
       </template>
     </el-drawer>
 
@@ -501,26 +616,48 @@
         <el-button @click="knowledgeGraphOpen = false">关闭</el-button>
       </template>
     </el-drawer>
+
+    <el-drawer
+      v-model="versionDrawerOpen"
+      :title="`${versionExpert.realName || versionExpert.userName || '专家'}的画像与图谱版本`"
+      size="88%"
+      destroy-on-close
+    >
+      <ExpertVersionHistory
+        v-if="versionExpert.userId"
+        mode="admin"
+        :user-id="versionExpert.userId"
+      />
+    </el-drawer>
   </div>
 </template>
 
 <script setup name="ExpertManagementList">
 import {
   deleteAdminExpert,
+  downloadAdminExpertProfileImportTemplate,
   getAdminExpertCertifications,
   getAdminExpertGraph,
+  getAdminExpertSchedules,
+  getKnowledgeGraphOverview,
   getKnowledgeGraphSubgraph,
   listAdminExperts,
   listAdminExpertUsers,
   projectKnowledgeGraph,
-  saveAdminExpert
+  saveAdminExpert,
+  saveAdminExpertSchedules
 } from "@/api/expert/platform"
+import Download from "@/plugins/download"
 import { getToken } from "@/utils/auth"
 import KnowledgeGraphSvg from "./KnowledgeGraphSvg.vue"
+import ExpertScheduleGantt from "@/components/ExpertScheduleGantt/index.vue"
+import ExpertUnavailablePeriods from "@/components/ExpertUnavailablePeriods/index.vue"
+import ExpertVersionHistory from "@/components/ExpertVersionHistory/index.vue"
 
 const { proxy } = getCurrentInstance()
 const loading = ref(false)
 const saving = ref(false)
+const wordImporting = ref(false)
 const experts = ref([])
 const expertUsers = ref([])
 const total = ref(0)
@@ -531,6 +668,8 @@ const editingAccount = ref("")
 const editingReviewStatus = ref("DRAFT")
 const profileForm = reactive({})
 const certificationAngles = ref([])
+const adminSchedules = ref([])
+const scheduleLoading = ref(false)
 const uploadedMaterials = ref({})
 const certificationLoading = ref(false)
 const uploadingCategory = ref("")
@@ -542,7 +681,20 @@ const knowledgeGraphOpen = ref(false)
 const knowledgeGraphLoading = ref(false)
 const knowledgeGraphExpert = ref({})
 const knowledgeGraph = ref({ entities: [], relations: [] })
+const overviewGraphOpen = ref(false)
+const overviewGraphLoading = ref(false)
+const overviewGraph = ref({
+  entities: [],
+  relations: [],
+  industryGroups: [],
+  expertCount: 0,
+  industryCount: 0,
+  sharedEntityCount: 0
+})
+const versionDrawerOpen = ref(false)
+const versionExpert = ref({})
 const uploadActionBase = import.meta.env.VITE_APP_BASE_API + "/expert/admin/experts/"
+const wordImportAction = import.meta.env.VITE_APP_BASE_API + "/expert/admin/experts/profile-import"
 const uploadHeaders = computed(() => ({ Authorization: "Bearer " + getToken() }))
 const adminUploadAction = computed(() =>
   profileForm.userId ? `${uploadActionBase}${profileForm.userId}/materials/upload` : ""
@@ -677,8 +829,11 @@ function resetProfileForm() {
     serviceStatus: "PENDING_CERTIFICATION"
   })
   certificationAngles.value = []
+  adminSchedules.value = []
+  scheduleLoading.value = false
   uploadedMaterials.value = {}
   uploadingCategory.value = ""
+  wordImporting.value = false
   editingReviewStatus.value = "DRAFT"
   profileRef.value?.clearValidate()
 }
@@ -720,14 +875,74 @@ function openEdit(row) {
   })
   dialogOpen.value = true
   loadCertificationAngles(row.userId)
+  loadSchedules(row.userId)
+}
+
+async function downloadWordTemplate() {
+  try {
+    const blob = await downloadAdminExpertProfileImportTemplate()
+    Download.saveAs(blob, "专家信息导入模板.docx")
+  }
+  catch {
+    proxy.$modal.msgError("Word模板下载失败")
+  }
+}
+
+function beforeWordImport(file) {
+  if (!file.name.toLowerCase().endsWith(".docx")) {
+    proxy.$modal.msgError("仅支持.docx格式的Word模板")
+    return false
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    proxy.$modal.msgError("Word模板不能超过5MB")
+    return false
+  }
+  wordImporting.value = true
+  return true
+}
+
+function handleWordImportSuccess(response) {
+  wordImporting.value = false
+  if (response.code !== 200) {
+    proxy.$modal.msgError(response.msg || "Word模板导入失败")
+    return
+  }
+  const imported = response.data?.profile || {}
+  const fields = response.data?.recognizedFields || []
+  fields.forEach(field => {
+    if (imported[field] != null) {
+      profileForm[field] = imported[field]
+    }
+  })
+  profileRef.value?.clearValidate()
+  const count = fields.length
+  proxy.$modal.msgSuccess(`已识别 ${count} 项基本信息，请核对后保存`)
+}
+
+function handleWordImportError() {
+  wordImporting.value = false
+  proxy.$modal.msgError("Word模板导入失败，请确认文件格式和内容")
 }
 
 function handleUserChange(userId) {
   uploadedMaterials.value = {}
   certificationAngles.value = []
+  adminSchedules.value = []
   if (userId) {
     loadCertificationAngles(userId)
+    loadSchedules(userId)
   }
+}
+
+function loadSchedules(userId) {
+  scheduleLoading.value = true
+  getAdminExpertSchedules(userId)
+    .then(res => {
+      adminSchedules.value = res.data || []
+    })
+    .finally(() => {
+      scheduleLoading.value = false
+    })
 }
 
 function loadCertificationAngles(userId) {
@@ -802,7 +1017,13 @@ function submitProfile() {
       },
       materials: Object.values(uploadedMaterials.value)
     })
-      .then(() => {
+      .then(async response => {
+        if (response.data?.version != null) {
+          profileForm.version = response.data.version
+        }
+        if (adminSchedules.value.length) {
+          await saveAdminExpertSchedules(profileForm.userId, adminSchedules.value)
+        }
         proxy.$modal.msgSuccess(dialogMode.value === "create"
           ? "专家建档完成，必选材料已直接认证通过"
           : "专家总体情况与认证材料已更新")
@@ -818,13 +1039,15 @@ function submitProfile() {
 function isAngleReady(angle) {
   return Boolean(
     uploadedMaterials.value[angle.categoryCode]
-    || angle.reviewStatus === "APPROVED"
+    || ["APPROVED", "EXPIRING_SOON"].includes(angle.certificationStatus)
   )
 }
 
 function angleStateText(angle) {
   if (uploadedMaterials.value[angle.categoryCode]) return "待保存"
-  if (angle.reviewStatus === "APPROVED") return "已认证"
+  if (angle.certificationStatus === "EXPIRED") return "资质已过期"
+  if (angle.certificationStatus === "EXPIRING_SOON") return "即将过期"
+  if (angle.certificationStatus === "APPROVED") return "已认证"
   if (angle.materialId) return "未认证"
   return "待上传"
 }
@@ -837,6 +1060,18 @@ function materialReviewStatusText(status) {
     RETURNED: "退回补正",
     REJECTED: "退回补正"
   }[status] || "待认证"
+}
+
+function adminValidityRemainingText(item) {
+  if (!item?.validUntil) return "审核通过后自动生成3个月有效期"
+  const expiryText = String(item.validUntil).slice(0, 10)
+  const expiry = new Date(`${expiryText}T00:00:00`)
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const remainingDays = Math.ceil((expiry.getTime() - today.getTime()) / 86400000)
+  if (remainingDays < 0) return `已过期 ${Math.abs(remainingDays)} 天`
+  if (remainingDays === 0) return `今天到期（${expiryText}）`
+  return `剩余 ${remainingDays} 天（至 ${expiryText}）`
 }
 
 function openGraph(row) {
@@ -872,6 +1107,40 @@ async function openKnowledgeGraph(row) {
   {
     knowledgeGraphLoading.value = false
   }
+}
+
+async function openOverviewGraph() {
+  overviewGraphOpen.value = true
+  overviewGraphLoading.value = true
+  try {
+    const response = await getKnowledgeGraphOverview()
+    overviewGraph.value = response.data || {
+      entities: [],
+      relations: [],
+      industryGroups: [],
+      expertCount: 0,
+      industryCount: 0,
+      sharedEntityCount: 0
+    }
+  }
+  catch {
+    overviewGraph.value = {
+      entities: [],
+      relations: [],
+      industryGroups: [],
+      expertCount: 0,
+      industryCount: 0,
+      sharedEntityCount: 0
+    }
+  }
+  finally {
+    overviewGraphLoading.value = false
+  }
+}
+
+function openVersionHistory(row) {
+  versionExpert.value = row
+  versionDrawerOpen.value = true
 }
 
 function graphScoreColor(score) {
@@ -938,6 +1207,7 @@ function serviceStatusText(status) {
     AVAILABLE: "正常接单",
     PAUSED: "暂停接单",
     PENDING_CERTIFICATION: "待认证",
+    CREDIT_BLOCKED: "禁止接单",
     EXITED: "已退出"
   }[status] || status || "待认证"
 }
@@ -947,6 +1217,7 @@ function serviceTagType(status) {
     AVAILABLE: "success",
     PAUSED: "warning",
     PENDING_CERTIFICATION: "warning",
+    CREDIT_BLOCKED: "danger",
     EXITED: "info"
   }[status] || "info"
 }
@@ -1021,11 +1292,43 @@ getList()
   .dialog-alert {
     margin-bottom: 18px;
   }
+  .word-import-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    border-radius: 8px;
+    background: var(--el-fill-color-lighter);
+    strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+    span {
+      color: var(--el-text-color-secondary);
+      font-size: 13px;
+    }
+  }
+  .word-import-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
   .status-lock-tip {
     margin-top: 7px;
     color: #a06b22;
     font-size: 12px;
     line-height: 1.55;
+  }
+  .admin-schedule-section {
+    margin-top: 8px;
+    padding-top: 20px;
+    border-top: 1px solid var(--el-border-color-lighter);
+    .material-heading {
+      margin-bottom: 14px;
+    }
   }
   .admin-material-section {
     margin-top: 6px;
@@ -1124,6 +1427,20 @@ getList()
   }
   .graph-status-tip {
     margin-bottom: 14px;
+  }
+  .overview-graph-tip {
+    margin: 14px 0 10px;
+  }
+  .industry-groups {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    > span {
+      color: #71808c;
+      font-size: 12px;
+    }
   }
   .admin-graph-groups {
     display: grid;

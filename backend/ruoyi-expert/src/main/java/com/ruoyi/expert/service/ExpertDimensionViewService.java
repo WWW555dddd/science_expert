@@ -22,9 +22,18 @@ public class ExpertDimensionViewService
     {
         List<ExpertGraphDimension> dimensions =
                 platformMapper.selectGraphDimensions(userId, graphStatus);
+        String evidenceStatus = graphStatus;
+        if ("DRAFT".equals(graphStatus)
+                && dimensions.stream().allMatch(item ->
+                        "EMPTY".equals(item.getGraphStatus())))
+        {
+            // 兼容升级前只保留正式分数的专家；新审核发布后会同步生成当前草稿。
+            dimensions = platformMapper.selectGraphDimensions(userId, "APPROVED");
+            evidenceStatus = "APPROVED";
+        }
         Map<String, List<Map<String, Object>>> evidenceByDimension = new HashMap<>();
         for (Map<String, Object> evidence :
-                platformMapper.selectLatestDimensionEvidence(userId, graphStatus))
+                platformMapper.selectLatestDimensionEvidence(userId, evidenceStatus))
         {
             String code = String.valueOf(evidence.get("dimensionCode"));
             Map<String, Object> item = new HashMap<>();
